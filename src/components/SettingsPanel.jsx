@@ -239,7 +239,9 @@ export default function SettingsPanel({ settings, enabledWidgets, todoistConfig,
                         if (connected) {
                           storage.setAdapter(googleDriveAdapter);
                           // Force re-render/reload logic here or via parent
-                          window.location.reload(); // Simple reload to refetch data from new source
+                          if (confirm('Connected to Google Drive! Click OK to reload and sync your data.')) {
+                            window.location.reload();
+                          }
                         }
                       } catch (err) {
                         console.error('Failed to connect Drive:', err);
