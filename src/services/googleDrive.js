@@ -146,11 +146,20 @@ class GoogleDriveAdapter {
     }
 
     async restoreSession() {
-        await this.initialize();
+        try {
+            await this.initialize();
+        } catch (e) {
+            alert('Google Scripts Failed to Load: ' + e.message);
+            return false;
+        }
+
         const savedToken = localStorage.getItem('gdrive_token');
         const savedExpiry = localStorage.getItem('gdrive_expiry');
+        const now = Date.now();
 
-        if (savedToken && savedExpiry && Number(savedExpiry) > Date.now()) {
+        // alert(`Debug Restore: Token=${!!savedToken}, Expiry=${savedExpiry}, Now=${now}, Valid=${savedToken && savedExpiry && Number(savedExpiry) > now}`);
+
+        if (savedToken && savedExpiry && Number(savedExpiry) > now) {
             accessToken = savedToken;
             tokenExpiry = Number(savedExpiry);
 
@@ -164,12 +173,18 @@ class GoogleDriveAdapter {
                 return true;
             } catch (err) {
                 console.warn('Cached token invalid or expired on usage:', err);
-                alert('Session Restore Failed: ' + (err.message || JSON.stringify(err)));
+                // Specific alert for the actual API failure
+                alert('Session Restore API Error: ' + (err.message || JSON.stringify(err)));
+                // Don't clear token immediately so we can see what happened, but usually we should.
                 clearToken();
                 return false;
             }
+        } else {
+            if (savedToken) {
+                alert('Session expired or invalid. Please login again.');
+            }
+            return false;
         }
-        return false;
     }
 
     async findOrCreateConfigFile() {
