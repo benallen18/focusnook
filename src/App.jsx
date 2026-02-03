@@ -664,10 +664,12 @@ function App() {
             onClose={() => setShowSettings(false)}
             onResetPositions={resetWidgetPositions}
             onDriveConnected={() => {
+              // Explicitly save the type FIRST
+              localStorage.setItem('focusnook-storage-type', 'gdrive');
               storage.setAdapter(googleDriveAdapter);
               setNeedsDriveAuth(false);
               loadData();
-              alert("Connected! Syncing data...");
+              alert("Connected! Data will sync automatically.");
             }}
           />
         )
