@@ -164,6 +164,7 @@ class GoogleDriveAdapter {
                 return true;
             } catch (err) {
                 console.warn('Cached token invalid or expired on usage:', err);
+                alert('Session Restore Failed: ' + (err.message || JSON.stringify(err)));
                 clearToken();
                 return false;
             }
