@@ -409,9 +409,50 @@ function App() {
     focusprep: { x: 24, y: 300 },
   };
 
+  const DebugOverlay = () => {
+    const [info, setInfo] = useState({});
+
+    const update = () => {
+      const token = localStorage.getItem('gdrive_token');
+      const expiry = localStorage.getItem('gdrive_expiry');
+      const type = localStorage.getItem('focusnook-storage-type');
+      const now = Date.now();
+      setInfo({
+        type,
+        hasToken: !!token,
+        tokenLen: token ? token.length : 0,
+        expired: expiry ? Number(expiry) < now : 'N/A',
+        expiryDate: expiry ? new Date(Number(expiry)).toLocaleTimeString() : 'N/A'
+      });
+    };
+
+    useEffect(() => {
+      update();
+      const interval = setInterval(update, 1000);
+      return () => clearInterval(interval);
+    }, []);
+
+    if (!settings.showClock) return null; // Use clock toggle as a hidden switch if needed, or just always show for now
+
+    return (
+      <div style={{
+        position: 'fixed', bottom: 10, right: 10, background: 'rgba(0,0,0,0.8)',
+        color: '#0f0', padding: 10, fontSize: 10, fontFamily: 'monospace',
+        zIndex: 9999, pointerEvents: 'none', borderRadius: 4
+      }}>
+        <div>Type: {info.type || 'local/null'}</div>
+        <div>Token: {info.hasToken ? 'YES' : 'NO'} ({info.tokenLen})</div>
+        <div>Expired: {String(info.expired)}</div>
+        <div>ExpTime: {info.expiryDate}</div>
+        <div>Time: {new Date().toLocaleTimeString()}</div>
+      </div>
+    );
+  };
+
   if (isLoading) {
     return (
       <div className="app-loading">
+        <DebugOverlay />
         <Loader size={48} className="animate-spin" />
         <p>Loading your space...</p>
         <style>{`
@@ -441,6 +482,7 @@ function App() {
   if (needsDriveAuth) {
     return (
       <div className="app-loading">
+        <DebugOverlay />
         <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
           <Music size={48} />
           <h2>Welcome back!</h2>
@@ -511,6 +553,7 @@ function App() {
 
   return (
     <div className="app">
+      <DebugOverlay />
       {/* Video Background */}
       <VideoBackground youtubeId={currentSpace.youtubeId} />
 
