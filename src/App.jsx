@@ -138,14 +138,23 @@ function App() {
       if (savedSettings) setSettings(savedSettings);
       if (savedTodoist) setTodoistConfig(savedTodoist);
 
+      // Always merge custom streams, even if music state is missing
+      const loadedCustomStreams = savedCustomStreams || [];
+      const loadedAllStreams = [...defaultMusicStreams, ...loadedCustomStreams];
+
       if (savedMusic) {
-        // Merge saved music state with current defaults to ensure new fields exists
-        const allStreams = [...defaultMusicStreams, ...(savedCustomStreams || [])];
         setMusicState(prev => ({
           ...prev,
           ...savedMusic,
-          selectedStream: savedMusic.selectedStream || allStreams[0],
-          customStreams: savedCustomStreams || []
+          selectedStream: savedMusic.selectedStream || loadedAllStreams[0],
+          customStreams: loadedCustomStreams
+        }));
+      } else if (loadedCustomStreams.length > 0) {
+        // If no saved music state but we have streams, preserve them
+        setMusicState(prev => ({
+          ...prev,
+          customStreams: loadedCustomStreams,
+          selectedStream: loadedAllStreams[0]
         }));
       }
     } catch (error) {

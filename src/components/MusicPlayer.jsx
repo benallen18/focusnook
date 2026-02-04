@@ -14,7 +14,7 @@ export default function MusicPlayer({ musicState, onMusicStateChange }) {
 
   useEffect(() => {
     if (!isControlled) {
-      storage.get('chillspace-custom-streams').then(saved => {
+      storage.get('focusnook-custom-streams').then(saved => {
         if (saved) setLocalCustomStreams(saved);
         setIsStorageLoading(false);
       });
@@ -72,7 +72,7 @@ export default function MusicPlayer({ musicState, onMusicStateChange }) {
   // Save custom streams to storage
   useEffect(() => {
     if (!isControlled && !isStorageLoading) {
-      storage.set('chillspace-custom-streams', localCustomStreams);
+      storage.set('focusnook-custom-streams', localCustomStreams);
     }
   }, [localCustomStreams, isControlled, isStorageLoading]);
 
