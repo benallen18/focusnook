@@ -157,25 +157,20 @@ class GoogleDriveAdapter {
         const savedExpiry = localStorage.getItem('gdrive_expiry');
         const now = Date.now();
 
-        console.log('[Drive Debug] restoring session...', { savedToken: !!savedToken, savedExpiry, now, isValid: savedToken && savedExpiry && Number(savedExpiry) > now });
-
         if (savedToken && savedExpiry && Number(savedExpiry) > now) {
             accessToken = savedToken;
             tokenExpiry = Number(savedExpiry);
 
             // Crucial: Tell gapi about the restored token
             if (window.gapi && window.gapi.client) {
-                console.log('[Drive Debug] Setting token in gapi');
                 window.gapi.client.setToken({ access_token: accessToken });
             }
 
             try {
-                console.log('[Drive Debug] Finding config file...');
                 await this.findOrCreateConfigFile();
-                console.log('[Drive Debug] Session restored successfully');
                 return true;
             } catch (err) {
-                console.warn('[Drive Debug] Cached token invalid or expired on usage:', err);
+                console.warn('Cached token invalid or expired on usage:', err);
                 // Specific alert for the actual API failure
                 alert('Session Restore API Error: ' + (err.message || JSON.stringify(err)));
                 // Don't clear token immediately so we can see what happened, but usually we should.
@@ -183,7 +178,6 @@ class GoogleDriveAdapter {
                 return false;
             }
         } else {
-            console.log('[Drive Debug] No valid token found in storage.');
             if (savedToken) {
                 alert('Session expired or invalid. Please login again.');
             }

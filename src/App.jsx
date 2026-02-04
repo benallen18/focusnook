@@ -164,7 +164,6 @@ function App() {
         const token = localStorage.getItem('gdrive_token');
         const expiry = localStorage.getItem('gdrive_expiry');
         if (token && expiry && Number(expiry) > Date.now()) {
-          console.log("Recovering lost storage type based on existing token");
           storageType = 'gdrive';
           localStorage.setItem('focusnook-storage-type', 'gdrive');
         }
@@ -421,45 +420,7 @@ function App() {
     focusprep: { x: 24, y: 300 },
   };
 
-  const DebugOverlay = () => {
-    const [info, setInfo] = useState({});
 
-    const update = () => {
-      const token = localStorage.getItem('gdrive_token');
-      const expiry = localStorage.getItem('gdrive_expiry');
-      const type = localStorage.getItem('focusnook-storage-type');
-      const now = Date.now();
-      setInfo({
-        type,
-        hasToken: !!token,
-        tokenLen: token ? token.length : 0,
-        expired: expiry ? Number(expiry) < now : 'N/A',
-        expiryDate: expiry ? new Date(Number(expiry)).toLocaleTimeString() : 'N/A'
-      });
-    };
-
-    useEffect(() => {
-      update();
-      const interval = setInterval(update, 1000);
-      return () => clearInterval(interval);
-    }, []);
-
-    if (!settings.showClock) return null; // Use clock toggle as a hidden switch if needed, or just always show for now
-
-    return (
-      <div style={{
-        position: 'fixed', bottom: 10, right: 10, background: 'rgba(0,0,0,0.8)',
-        color: '#0f0', padding: 10, fontSize: 10, fontFamily: 'monospace',
-        zIndex: 9999, pointerEvents: 'none', borderRadius: 4
-      }}>
-        <div>Type: {info.type || 'local/null'}</div>
-        <div>Token: {info.hasToken ? 'YES' : 'NO'} ({info.tokenLen})</div>
-        <div>Expired: {String(info.expired)}</div>
-        <div>ExpTime: {info.expiryDate}</div>
-        <div>Time: {new Date().toLocaleTimeString()}</div>
-      </div>
-    );
-  };
 
   if (isLoading) {
     return (
@@ -525,27 +486,7 @@ function App() {
             Continue with Local Storage
           </button>
 
-          <button
-            style={{
-              background: 'transparent', color: '#666', border: '1px solid #333',
-              marginTop: '20px', cursor: 'pointer', fontSize: '11px', padding: '4px 8px', borderRadius: '4px'
-            }}
-            onClick={() => {
-              const token = localStorage.getItem('gdrive_token');
-              const expiry = localStorage.getItem('gdrive_expiry');
-              const type = localStorage.getItem('focusnook-storage-type');
-              const now = Date.now();
-              alert(JSON.stringify({
-                hasToken: !!token,
-                tokenStart: token ? token.substring(0, 5) + '...' : 'N/A',
-                expiry: expiry,
-                timeLeftMinutes: expiry ? ((Number(expiry) - now) / 60000).toFixed(1) : 'N/A',
-                storageType: type
-              }, null, 2));
-            }}
-          >
-            Debug Session Info
-          </button>
+
         </div>
         <style>{`
           .app-loading {
