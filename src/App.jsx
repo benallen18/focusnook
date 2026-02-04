@@ -470,6 +470,28 @@ function App() {
           >
             Continue with Local Storage
           </button>
+
+          <button
+            style={{
+              background: 'transparent', color: '#666', border: '1px solid #333',
+              marginTop: '20px', cursor: 'pointer', fontSize: '11px', padding: '4px 8px', borderRadius: '4px'
+            }}
+            onClick={() => {
+              const token = localStorage.getItem('gdrive_token');
+              const expiry = localStorage.getItem('gdrive_expiry');
+              const type = localStorage.getItem('focusnook-storage-type');
+              const now = Date.now();
+              alert(JSON.stringify({
+                hasToken: !!token,
+                tokenStart: token ? token.substring(0, 5) + '...' : 'N/A',
+                expiry: expiry,
+                timeLeftMinutes: expiry ? ((Number(expiry) - now) / 60000).toFixed(1) : 'N/A',
+                storageType: type
+              }, null, 2));
+            }}
+          >
+            Debug Session Info
+          </button>
         </div>
         <style>{`
           .app-loading {
