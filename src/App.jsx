@@ -271,7 +271,7 @@ function App() {
     if (!isLoading) {
       storage.set('focusnook-music', musicState);
       if (musicState.customStreams) {
-        storage.set('chillspace-custom-streams', musicState.customStreams);
+        storage.set('focusnook-custom-streams', musicState.customStreams);
       }
     }
   }, [musicState, isLoading]);
@@ -324,7 +324,7 @@ function App() {
 
   // Save custom spaces to localStorage
   useEffect(() => {
-    if (!isLoading) storage.set('chillspace-custom-spaces', customSpaces);
+    if (!isLoading) storage.set('focusnook-custom-spaces', customSpaces);
   }, [customSpaces, isLoading]);
 
   const addSpace = useCallback((newSpace) => {
