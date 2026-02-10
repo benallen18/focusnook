@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import VideoBackground from './components/VideoBackground';
 import Pomodoro from './components/Pomodoro';
 import AmbientSounds from './components/AmbientSounds';
@@ -16,266 +16,683 @@ import { defaultSpaces, defaultMusicStreams } from './data/spaces';
 import { Music, Loader } from 'lucide-react';
 import YouTubePlayer from './components/YouTubePlayer';
 import { storage, LocalStorageAdapter } from './services/storage';
-import { googleDriveAdapter, loadGoogleScripts } from './services/googleDrive';
+import {
+  googleDriveAdapter,
+  loadGoogleScripts,
+  DRIVE_AUTH_REQUIRED_EVENT,
+} from './services/googleDrive';
+import { localFileAdapter } from './services/localFile';
+import { APP_STORAGE_KEYS, LEGACY_KEY_MIGRATIONS, WIDGET_IDS } from './services/appKeys';
+import {
+  createPresetLayout,
+  normalizeLayoutForViewport,
+  getDefaultWidgetVisibility,
+  getDefaultWidgetSize,
+  LAYOUT_PRESETS,
+} from './services/layouts';
+
+const DEFAULT_ENABLED_WIDGETS = {
+  pomodoro: true,
+  sounds: true,
+  todos: true,
+  notes: true,
+  planner: true,
+  music: true,
+  focusprep: true,
+};
+
+const DEFAULT_SETTINGS = {
+  widgetOpacity: 1,
+  showClock: true,
+  use12Hour: true,
+  plannerStartHour: 9,
+  plannerEndHour: 17,
+  pomodoroMuted: false,
+};
+
+const DEFAULT_TODOIST_CONFIG = {
+  token: '',
+  isConnected: false,
+  selectedFilter: 'today',
+};
+
+const DEFAULT_MUSIC_STATE = {
+  selectedStream: defaultMusicStreams[0],
+  isPlaying: false,
+  volume: 50,
+  isMuted: false,
+  customStreams: [],
+};
+
+const shallowEqual = (a = {}, b = {}) => {
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+
+  return keysA.every((key) => a[key] === b[key]);
+};
+
+const getViewport = () => ({
+  width: window.innerWidth,
+  height: window.innerHeight,
+});
+
+const parseLegacyValue = (rawValue) => {
+  if (!rawValue) return null;
+  try {
+    return JSON.parse(rawValue);
+  } catch {
+    return null;
+  }
+};
+
+const getLegacyWidgetGeometry = () => {
+  const legacy = {};
+
+  WIDGET_IDS.forEach((widgetId) => {
+    const posRaw = localStorage.getItem(`chillspace-widget-pos-${widgetId}`);
+    const sizeRaw = localStorage.getItem(`chillspace-widget-size-${widgetId}`);
+
+    const position = parseLegacyValue(posRaw);
+    const size = parseLegacyValue(sizeRaw);
+
+    if (position || size) {
+      legacy[widgetId] = {
+        ...(position || {}),
+        ...(size || {}),
+      };
+    }
+  });
+
+  return legacy;
+};
+
+const getLayoutVisibility = (layout) => {
+  const visibility = getDefaultWidgetVisibility();
+  if (!layout?.widgets) return visibility;
+
+  WIDGET_IDS.forEach((widgetId) => {
+    const widget = layout.widgets[widgetId];
+    if (widget && typeof widget.visible === 'boolean') {
+      visibility[widgetId] = widget.visible;
+    }
+  });
+
+  return visibility;
+};
+
+const getWidgetFrame = (layout, widgetId) => {
+  const fallbackSize = getDefaultWidgetSize(widgetId);
+  const widget = layout?.widgets?.[widgetId];
+
+  return {
+    position: {
+      x: Number(widget?.x) || 24,
+      y: Number(widget?.y) || 80,
+    },
+    size: {
+      width: Number(widget?.width) || fallbackSize.width,
+      height: Number(widget?.height) || fallbackSize.height,
+    },
+  };
+};
 
 function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [needsDriveAuth, setNeedsDriveAuth] = useState(false);
-  const [storageType, setStorageType] = useState('local'); // Track storage type reactively
+  const [storageType, setStorageType] = useState('local');
+  const [requiresFilePermission, setRequiresFilePermission] = useState(false);
 
-  // Load custom spaces
   const [customSpaces, setCustomSpaces] = useState([]);
+  const [hiddenDefaultSpaceIds, setHiddenDefaultSpaceIds] = useState([]);
 
-  // Combine default and custom spaces
-  const allSpaces = [...defaultSpaces, ...customSpaces];
+  const visibleDefaultSpaces = useMemo(
+    () => defaultSpaces.filter((space) => !hiddenDefaultSpaceIds.includes(space.id)),
+    [hiddenDefaultSpaceIds]
+  );
+  const allSpaces = useMemo(
+    () => [...visibleDefaultSpaces, ...customSpaces],
+    [visibleDefaultSpaces, customSpaces]
+  );
 
-  // Load saved space
   const [currentSpace, setCurrentSpace] = useState(defaultSpaces[0]);
   const [showSpaceBrowser, setShowSpaceBrowser] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
-  // Which widgets are shown as icons in the dock (controlled by settings)
-  const [enabledWidgets, setEnabledWidgets] = useState({
-    pomodoro: true,
-    sounds: true,
-    todos: true,
-    notes: true,
-    planner: true,
-    music: true,
-    focusprep: true,
-  });
+  const [enabledWidgets, setEnabledWidgets] = useState(DEFAULT_ENABLED_WIDGETS);
+  const [widgetVisibility, setWidgetVisibility] = useState(getDefaultWidgetVisibility());
 
-  // Which widgets are currently visible/open (controlled by dock clicks)
-  const [widgetVisibility, setWidgetVisibility] = useState({
-    pomodoro: true,
-    sounds: false,
-    todos: true,
-    notes: false,
-    planner: false,
-    music: false,
-    focusprep: false,
-  });
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [todoistConfig, setTodoistConfig] = useState(DEFAULT_TODOIST_CONFIG);
+  const [musicState, setMusicState] = useState(DEFAULT_MUSIC_STATE);
 
-  const [settings, setSettings] = useState({
-    widgetOpacity: 1,
-    showClock: true,
-    use12Hour: true,
-    plannerStartHour: 9,  // 9 AM
-    plannerEndHour: 17,   // 5 PM
-  });
+  const [layouts, setLayouts] = useState([]);
+  const [activeLayoutId, setActiveLayoutId] = useState('');
+  const hasHydratedRef = useRef(false);
 
-  // Todoist integration config
-  const [todoistConfig, setTodoistConfig] = useState({
-    token: '',
-    isConnected: false,
-    selectedFilter: 'today', // 'today', 'all', or a project ID
-  });
+  const activeLayout = useMemo(
+    () => layouts.find((layout) => layout.id === activeLayoutId) || null,
+    [layouts, activeLayoutId]
+  );
 
-  // Music player state (lifted for persistent playback)
-  const [musicState, setMusicState] = useState({
-    selectedStream: defaultMusicStreams[0],
-    isPlaying: false,
-    volume: 50,
-    isMuted: false,
-    customStreams: [],
-  });
-
-  const pomodoroRef = useRef(null);
-
-  // Track z-index for bringing widgets to front when clicked
   const [widgetZIndices, setWidgetZIndices] = useState({});
   const zIndexCounter = useRef(10);
 
-  // Key to force widget remount when positions are reset
-  const [positionResetKey, setPositionResetKey] = useState(0);
-
   const bringWidgetToFront = useCallback((widgetId) => {
     zIndexCounter.current += 1;
-    setWidgetZIndices(prev => ({
+    setWidgetZIndices((prev) => ({
       ...prev,
-      [widgetId]: zIndexCounter.current
+      [widgetId]: zIndexCounter.current,
     }));
   }, []);
 
-  // Initial Data Load
+  const migrateLegacyStorageData = useCallback(async () => {
+    for (const [legacyKey, nextKey] of Object.entries(LEGACY_KEY_MIGRATIONS)) {
+      const currentValue = await storage.get(nextKey);
+      if (currentValue !== null && currentValue !== undefined) {
+        continue;
+      }
+
+      const legacyValue = await storage.get(legacyKey);
+      if (legacyValue !== null && legacyValue !== undefined) {
+        await storage.set(nextKey, legacyValue);
+      }
+    }
+
+    const legacyFocusPrepRaw = localStorage.getItem('chillspace-focus-prep');
+    if (legacyFocusPrepRaw) {
+      const currentValue = await storage.get('focusnook-focus-prep');
+      if (currentValue === null || currentValue === undefined) {
+        const parsed = parseLegacyValue(legacyFocusPrepRaw);
+        if (Array.isArray(parsed)) {
+          await storage.set('focusnook-focus-prep', parsed);
+        }
+      }
+    }
+  }, []);
+
+  const buildInitialLayoutState = useCallback((savedLayouts, savedActiveLayoutId, savedWidgetVisibility) => {
+    const viewport = getViewport();
+
+    if (Array.isArray(savedLayouts) && savedLayouts.length > 0) {
+      const normalizedLayouts = savedLayouts.map((layout) => normalizeLayoutForViewport(layout, viewport));
+      const activeId = normalizedLayouts.some((layout) => layout.id === savedActiveLayoutId)
+        ? savedActiveLayoutId
+        : normalizedLayouts[0].id;
+
+      return { layouts: normalizedLayouts, activeLayoutId: activeId };
+    }
+
+    const defaultLayout = createPresetLayout('balanced', {
+      id: 'layout-balanced-default',
+      name: 'Balanced',
+      viewport,
+    });
+
+    if (savedWidgetVisibility && typeof savedWidgetVisibility === 'object') {
+      WIDGET_IDS.forEach((widgetId) => {
+        if (typeof savedWidgetVisibility[widgetId] === 'boolean') {
+          defaultLayout.widgets[widgetId].visible = savedWidgetVisibility[widgetId];
+        }
+      });
+    }
+
+    const legacyGeometry = getLegacyWidgetGeometry();
+    WIDGET_IDS.forEach((widgetId) => {
+      const legacyWidget = legacyGeometry[widgetId];
+      if (!legacyWidget) return;
+
+      defaultLayout.widgets[widgetId] = {
+        ...defaultLayout.widgets[widgetId],
+        x: Number(legacyWidget.x) || defaultLayout.widgets[widgetId].x,
+        y: Number(legacyWidget.y) || defaultLayout.widgets[widgetId].y,
+        width: Number(legacyWidget.width) || defaultLayout.widgets[widgetId].width,
+        height: Number(legacyWidget.height) || defaultLayout.widgets[widgetId].height,
+      };
+    });
+
+    return {
+      layouts: [normalizeLayoutForViewport(defaultLayout, viewport)],
+      activeLayoutId: defaultLayout.id,
+    };
+  }, []);
+
   const loadData = useCallback(async () => {
     setIsLoading(true);
+
     try {
-      // Pre-load scripts anyway for faster connection later if not already loaded
       loadGoogleScripts().catch(console.error);
+      await migrateLegacyStorageData();
 
-      const [
-        savedCustomSpaces,
-        savedSpaceId,
-        savedEnabledWidgets,
-        savedWidgetVisibility,
-        savedSettings,
-        savedTodoist,
-        savedMusic,
-        savedCustomStreams
-      ] = await Promise.all([
-        storage.get('focusnook-custom-spaces'),
-        storage.get('focusnook-current-space'),
-        storage.get('focusnook-enabled-widgets'),
-        storage.get('focusnook-widget-visibility'),
-        storage.get('focusnook-settings'),
-        storage.get('focusnook-todoist'),
-        storage.get('focusnook-music'),
-        storage.get('focusnook-custom-streams')
-      ]);
+      const data = await storage.getAll(APP_STORAGE_KEYS);
 
-      if (savedCustomSpaces) setCustomSpaces(savedCustomSpaces);
+      const savedCustomSpaces = Array.isArray(data['focusnook-custom-spaces']) ? data['focusnook-custom-spaces'] : [];
+      const savedHiddenDefaultSpaceIds = Array.isArray(data['focusnook-hidden-default-space-ids'])
+        ? data['focusnook-hidden-default-space-ids']
+        : [];
+      const savedEnabledWidgets = data['focusnook-enabled-widgets'];
+      const savedWidgetVisibility = data['focusnook-widget-visibility'];
+      const savedSettings = data['focusnook-settings'];
+      const savedTodoist = data['focusnook-todoist'];
+      const savedMusic = data['focusnook-music'];
+      const savedCustomStreams = Array.isArray(data['focusnook-custom-streams'])
+        ? data['focusnook-custom-streams']
+        : [];
+      const savedLayouts = data['focusnook-layouts'];
+      const savedActiveLayoutId = data['focusnook-active-layout'];
 
-      // Handle current space logic utilizing both default and loaded custom spaces
-      const loadedAllSpaces = [...defaultSpaces, ...(savedCustomSpaces || [])];
-      if (savedSpaceId) {
-        const found = loadedAllSpaces.find(s => s.id === savedSpaceId);
-        if (found) setCurrentSpace(found);
+      const { layouts: nextLayouts, activeLayoutId: nextActiveLayoutId } = buildInitialLayoutState(
+        savedLayouts,
+        savedActiveLayoutId,
+        savedWidgetVisibility
+      );
+
+      const nextActiveLayout = nextLayouts.find((layout) => layout.id === nextActiveLayoutId) || nextLayouts[0];
+
+      setLayouts(nextLayouts);
+      setActiveLayoutId(nextActiveLayoutId);
+      setWidgetVisibility(getLayoutVisibility(nextActiveLayout));
+
+      setCustomSpaces(savedCustomSpaces);
+      setHiddenDefaultSpaceIds(savedHiddenDefaultSpaceIds);
+
+      if (savedEnabledWidgets && typeof savedEnabledWidgets === 'object') {
+        setEnabledWidgets((prev) => ({ ...prev, ...savedEnabledWidgets }));
       }
 
-      if (savedEnabledWidgets) setEnabledWidgets(savedEnabledWidgets);
-      if (savedWidgetVisibility) setWidgetVisibility(savedWidgetVisibility);
-      if (savedSettings) setSettings(savedSettings);
-      if (savedTodoist) setTodoistConfig(savedTodoist);
+      if (savedSettings && typeof savedSettings === 'object') {
+        setSettings((prev) => ({ ...prev, ...savedSettings }));
+      } else {
+        setSettings(DEFAULT_SETTINGS);
+      }
 
-      // Always merge custom streams, even if music state is missing
-      const loadedCustomStreams = savedCustomStreams || [];
-      const loadedAllStreams = [...defaultMusicStreams, ...loadedCustomStreams];
+      if (savedTodoist && typeof savedTodoist === 'object') {
+        setTodoistConfig((prev) => ({ ...prev, ...savedTodoist }));
+      }
 
-      if (savedMusic) {
-        setMusicState(prev => ({
+      const allStreams = [...defaultMusicStreams, ...savedCustomStreams];
+      if (savedMusic && typeof savedMusic === 'object') {
+        setMusicState((prev) => ({
           ...prev,
           ...savedMusic,
-          selectedStream: savedMusic.selectedStream || loadedAllStreams[0],
-          customStreams: loadedCustomStreams
+          customStreams: savedCustomStreams,
+          selectedStream: savedMusic.selectedStream || allStreams[0],
         }));
-      } else if (loadedCustomStreams.length > 0) {
-        // If no saved music state but we have streams, preserve them
-        setMusicState(prev => ({
+      } else {
+        setMusicState((prev) => ({
           ...prev,
-          customStreams: loadedCustomStreams,
-          selectedStream: loadedAllStreams[0]
+          customStreams: savedCustomStreams,
+          selectedStream: allStreams[0],
         }));
       }
+
+      const loadedDefaultSpaces = defaultSpaces.filter((space) => !savedHiddenDefaultSpaceIds.includes(space.id));
+      const loadedAllSpaces = [...loadedDefaultSpaces, ...savedCustomSpaces];
+      const savedSpaceId = data['focusnook-current-space'];
+      const nextCurrentSpace = loadedAllSpaces.find((space) => space.id === savedSpaceId) || loadedAllSpaces[0] || defaultSpaces[0];
+      setCurrentSpace(nextCurrentSpace);
+
+      hasHydratedRef.current = true;
     } catch (error) {
-      console.error('Failed to load application data:', error);
+      if (error?.code === 'AUTH_REQUIRED' || String(error?.message || '').includes('Drive auth required')) {
+        setNeedsDriveAuth(true);
+      } else {
+        console.error('Failed to load application data:', error);
+      }
     } finally {
       setIsLoading(false);
     }
+  }, [buildInitialLayoutState, migrateLegacyStorageData]);
+
+  const persistLayoutsNow = useCallback(async (nextLayouts, nextActiveLayoutId) => {
+    await Promise.all([
+      storage.set('focusnook-layouts', nextLayouts),
+      storage.set('focusnook-active-layout', nextActiveLayoutId),
+    ]);
+  }, []);
+
+  useEffect(() => {
+    const handler = () => {
+      setNeedsDriveAuth(true);
+      setIsLoading(false);
+    };
+
+    window.addEventListener(DRIVE_AUTH_REQUIRED_EVENT, handler);
+    return () => window.removeEventListener(DRIVE_AUTH_REQUIRED_EVENT, handler);
   }, []);
 
   useEffect(() => {
     const init = async () => {
-      // Initialize storage adapter preference
-      let storageType = localStorage.getItem('focusnook-storage-type');
+      const preferredStorageType = localStorage.getItem('focusnook-storage-type');
 
-      // RECOVERY: If no type set, but we have a valid token, assume Drive
-      if (!storageType) {
-        const token = localStorage.getItem('gdrive_token');
-        const expiry = localStorage.getItem('gdrive_expiry');
-        if (token && expiry && Number(expiry) > Date.now()) {
-          storageType = 'gdrive';
-          localStorage.setItem('focusnook-storage-type', 'gdrive');
-        }
-      }
-
-      if (storageType === 'gdrive') {
+      if (preferredStorageType === 'gdrive') {
         try {
-          // Initialize scripts
           await googleDriveAdapter.initialize();
-
-          // Try to restore session silently
           const restored = await googleDriveAdapter.restoreSession();
 
           if (restored) {
-            console.log('Drive session restored from cache');
             storage.setAdapter(googleDriveAdapter);
             setStorageType('gdrive');
-            loadData();
+            await loadData();
           } else {
-            // We need fresh auth
             setNeedsDriveAuth(true);
             setIsLoading(false);
           }
-          // Do NOT call loadData here, wait for user interaction
-        } catch (e) {
-          console.error('Failed to init drive scripts, falling back to local', e);
+        } catch (error) {
+          console.error('Failed to init Drive scripts, falling back to local', error);
           storage.setAdapter(new LocalStorageAdapter());
-          loadData();
+          setStorageType('local');
+          await loadData();
         }
-      } else {
-        // Local storage, proceed immediately
-        loadData();
+        return;
       }
+
+      if (preferredStorageType === 'localfile') {
+        try {
+          await localFileAdapter.initialize();
+          const result = await localFileAdapter.restoreSession();
+
+          if (result.success) {
+            storage.setAdapter(localFileAdapter);
+            setStorageType('localfile');
+            await loadData();
+            return;
+          }
+
+          if (result.reason === 'permission_required') {
+            setStorageType('localfile');
+            setRequiresFilePermission(result.fileName);
+            setIsLoading(false);
+            return;
+          }
+
+          storage.setAdapter(new LocalStorageAdapter());
+          setStorageType('local');
+          await loadData();
+          return;
+        } catch (error) {
+          console.error('Failed to restore local file session, falling back to local storage', error);
+          storage.setAdapter(new LocalStorageAdapter());
+          setStorageType('local');
+          await loadData();
+          return;
+        }
+      }
+
+      try {
+        await googleDriveAdapter.initialize();
+        const restored = await googleDriveAdapter.restoreSession();
+        if (restored) {
+          storage.setAdapter(googleDriveAdapter);
+          setStorageType('gdrive');
+          await loadData();
+          return;
+        }
+      } catch (error) {
+        console.warn('Drive session check failed, continuing with local storage', error);
+      }
+
+      setStorageType('local');
+      await loadData();
     };
 
     init();
   }, [loadData]);
 
-  // Handle manual Drive connection
-  const handleDriveConnect = async () => {
-    setIsLoading(true);
-    try {
-      await googleDriveAdapter.connect();
-      storage.setAdapter(googleDriveAdapter);
-      setNeedsDriveAuth(false);
-      // Now that we are connected, load data
-      loadData();
-    } catch (err) {
-      console.error('Drive connection failed:', err);
-      const msg = err.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
-      alert('Failed to connect: ' + msg + '. Switching to local storage.');
+  useEffect(() => {
+    if (!allSpaces.length) return;
 
-      storage.setAdapter(new LocalStorageAdapter());
-      localStorage.removeItem('focusnook-storage-type');
-      setNeedsDriveAuth(false);
-      loadData();
+    setCurrentSpace((prev) => {
+      const stillExists = allSpaces.some((space) => space.id === prev?.id);
+      if (stillExists) return prev;
+      return allSpaces[0];
+    });
+  }, [allSpaces]);
+
+  useEffect(() => {
+    if (!hasHydratedRef.current || !layouts.length || isLoading) return;
+
+    const timeout = setTimeout(() => {
+      storage.set('focusnook-layouts', layouts);
+      storage.set('focusnook-active-layout', activeLayoutId);
+    }, 600);
+
+    return () => clearTimeout(timeout);
+  }, [layouts, activeLayoutId, isLoading]);
+
+  useEffect(() => {
+    if (!activeLayout) return;
+    const nextVisibility = getLayoutVisibility(activeLayout);
+    setWidgetVisibility((prev) => (shallowEqual(prev, nextVisibility) ? prev : nextVisibility));
+  }, [activeLayout]);
+
+  const updateLayoutById = useCallback((layoutId, updater) => {
+    if (!layoutId) return;
+
+    setLayouts((prev) => {
+      const index = prev.findIndex((layout) => layout.id === layoutId);
+      if (index === -1) return prev;
+
+      const current = prev[index];
+      const updated = typeof updater === 'function' ? updater(current) : { ...current, ...updater };
+      const normalized = normalizeLayoutForViewport(
+        {
+          ...updated,
+          updatedAt: Date.now(),
+        },
+        getViewport()
+      );
+
+      const next = [...prev];
+      next[index] = normalized;
+      return next;
+    });
+  }, []);
+
+  const handleWidgetLayoutChange = useCallback(({ widgetId, position, size }) => {
+    if (!activeLayoutId || !widgetId) return;
+
+    updateLayoutById(activeLayoutId, (layout) => {
+      const currentWidget = layout.widgets?.[widgetId] || {};
+      return {
+        ...layout,
+        widgets: {
+          ...layout.widgets,
+          [widgetId]: {
+            ...currentWidget,
+            x: Number(position?.x) || currentWidget.x || 24,
+            y: Number(position?.y) || currentWidget.y || 80,
+            width: Number(size?.width) || currentWidget.width || getDefaultWidgetSize(widgetId).width,
+            height: Number(size?.height) || currentWidget.height || getDefaultWidgetSize(widgetId).height,
+            visible: typeof currentWidget.visible === 'boolean' ? currentWidget.visible : true,
+          },
+        },
+      };
+    });
+  }, [activeLayoutId, updateLayoutById]);
+
+  const toggleWidgetVisibility = useCallback((widgetId) => {
+    setWidgetVisibility((prev) => {
+      const next = {
+        ...prev,
+        [widgetId]: !prev[widgetId],
+      };
+
+      if (activeLayoutId) {
+        updateLayoutById(activeLayoutId, (layout) => {
+          const currentWidget = layout.widgets?.[widgetId] || {};
+          return {
+            ...layout,
+            widgets: {
+              ...layout.widgets,
+              [widgetId]: {
+                ...currentWidget,
+                visible: next[widgetId],
+              },
+            },
+          };
+        });
+      }
+
+      return next;
+    });
+  }, [activeLayoutId, updateLayoutById]);
+
+  const activateLayout = useCallback((layoutId) => {
+    const nextLayout = layouts.find((layout) => layout.id === layoutId);
+    if (!nextLayout) return;
+
+    setActiveLayoutId(layoutId);
+    setWidgetVisibility(getLayoutVisibility(nextLayout));
+  }, [layouts]);
+
+  const saveCurrentLayout = useCallback(async () => {
+    if (!activeLayoutId) return false;
+
+    const nextLayouts = layouts.map((layout) => (layout.id === activeLayoutId
+      ? {
+        ...layout,
+        updatedAt: Date.now(),
+        viewport: getViewport(),
+      }
+      : layout));
+
+    setLayouts(nextLayouts);
+    await persistLayoutsNow(nextLayouts, activeLayoutId);
+    return true;
+  }, [activeLayoutId, layouts, persistLayoutsNow]);
+
+  const saveLayoutAs = useCallback((name) => {
+    if (!activeLayout) return;
+
+    const now = Date.now();
+    const duplicated = normalizeLayoutForViewport(
+      {
+        ...activeLayout,
+        id: `layout-${now}`,
+        name,
+        createdAt: now,
+        updatedAt: now,
+      },
+      getViewport()
+    );
+
+    setLayouts((prev) => [...prev, duplicated]);
+    setActiveLayoutId(duplicated.id);
+    setWidgetVisibility(getLayoutVisibility(duplicated));
+  }, [activeLayout]);
+
+  const renameLayout = useCallback((layoutId, name) => {
+    updateLayoutById(layoutId, (layout) => ({
+      ...layout,
+      name,
+    }));
+  }, [updateLayoutById]);
+
+  const deleteLayout = useCallback((layoutId) => {
+    if (layouts.length <= 1) return;
+
+    const remaining = layouts.filter((layout) => layout.id !== layoutId);
+    if (!remaining.length) return;
+
+    const nextActive = remaining.some((layout) => layout.id === activeLayoutId)
+      ? activeLayoutId
+      : remaining[0].id;
+
+    setLayouts(remaining);
+    setActiveLayoutId(nextActive);
+    const nextLayout = remaining.find((layout) => layout.id === nextActive) || remaining[0];
+    setWidgetVisibility(getLayoutVisibility(nextLayout));
+  }, [activeLayoutId, layouts]);
+
+  const applyLayoutPreset = useCallback((presetId) => {
+    if (!activeLayoutId) return;
+
+    const current = layouts.find((layout) => layout.id === activeLayoutId);
+    if (!current) return;
+
+    const preset = createPresetLayout(presetId, {
+      id: current.id,
+      name: current.name,
+      createdAt: current.createdAt,
+      viewport: getViewport(),
+    });
+
+    setLayouts((prev) => prev.map((layout) => (layout.id === current.id ? preset : layout)));
+    setWidgetVisibility(getLayoutVisibility(preset));
+  }, [activeLayoutId, layouts]);
+
+  const resetActiveLayout = useCallback(() => {
+    const current = layouts.find((layout) => layout.id === activeLayoutId);
+    const presetId = current?.presetId || 'balanced';
+    applyLayoutPreset(presetId);
+  }, [activeLayoutId, applyLayoutPreset, layouts]);
+
+  const handleDriveConnect = async () => {
+    await googleDriveAdapter.connect();
+  };
+
+  const handleFilePermission = async () => {
+    const granted = await localFileAdapter.verifyPermission();
+    if (granted) {
+      storage.setAdapter(localFileAdapter);
+      setStorageType('localfile');
+      setRequiresFilePermission(false);
+      await loadData();
     }
   };
 
-  // Save enabled widgets
+  const handleStorageModeChange = useCallback(async (mode, options = {}) => {
+    if (mode === 'localfile') {
+      storage.setAdapter(localFileAdapter);
+      setStorageType('localfile');
+      setNeedsDriveAuth(false);
+      if (!options.skipLoad) {
+        await loadData();
+      }
+      return;
+    }
+
+    storage.setAdapter(new LocalStorageAdapter());
+    setStorageType('local');
+    setNeedsDriveAuth(false);
+    if (!options.skipLoad) {
+      await loadData();
+    }
+  }, [loadData]);
+
+  const snapshotAppData = useCallback(async () => storage.getAll(APP_STORAGE_KEYS), []);
+
   useEffect(() => {
     if (!isLoading) {
       storage.set('focusnook-enabled-widgets', enabledWidgets);
     }
   }, [enabledWidgets, isLoading]);
 
-  // Save widget visibility
   useEffect(() => {
     if (!isLoading) {
       storage.set('focusnook-widget-visibility', widgetVisibility);
     }
   }, [widgetVisibility, isLoading]);
 
-  // Save widget Z-indices (local only usually, or sync?) -> Let's sync if we can, but it's transient
-  // Actually we aren't saving z-indices to storage in original code? 
-  // Checking original... it seems we weren't saving z-indices? 
-  // Ah, the original code had: storage.set('chillspace-z-indices', widgetZIndices) check?
-  // Let's assume we want to save them if we were before.
-  // Wait, I don't see z-indices load in the Promise.all above. So mapped to transient.
-
-  // Save current space
   useEffect(() => {
     if (!isLoading && currentSpace) {
       storage.set('focusnook-current-space', currentSpace.id);
     }
   }, [currentSpace, isLoading]);
 
-  // Save settings
   useEffect(() => {
     if (!isLoading) {
       storage.set('focusnook-settings', settings);
     }
   }, [settings, isLoading]);
 
-  // Save Todoist config
   useEffect(() => {
     if (!isLoading) {
       storage.set('focusnook-todoist', todoistConfig);
     }
   }, [todoistConfig, isLoading]);
 
-  // Save music state
   useEffect(() => {
     if (!isLoading) {
       storage.set('focusnook-music', musicState);
@@ -285,93 +702,81 @@ function App() {
     }
   }, [musicState, isLoading]);
 
+  useEffect(() => {
+    if (!isLoading) {
+      storage.set('focusnook-custom-spaces', customSpaces);
+    }
+  }, [customSpaces, isLoading]);
+
+  useEffect(() => {
+    if (!isLoading) {
+      storage.set('focusnook-hidden-default-space-ids', hiddenDefaultSpaceIds);
+    }
+  }, [hiddenDefaultSpaceIds, isLoading]);
+
   const updateMusicState = useCallback((updates) => {
     if (typeof updates === 'function') {
       setMusicState(updates);
-    } else {
-      setMusicState(prev => ({ ...prev, ...updates }));
+      return;
     }
+    setMusicState((prev) => ({ ...prev, ...updates }));
   }, []);
 
-  // Toggle widget visibility (from dock)
-  const toggleWidgetVisibility = useCallback((widgetId) => {
-    setWidgetVisibility(prev => ({
-      ...prev,
-      [widgetId]: !prev[widgetId]
-    }));
-  }, []);
-
-  // Toggle widget enabled in dock (from settings)
   const toggleWidgetEnabled = useCallback((widgetId) => {
-    setEnabledWidgets(prev => ({
+    setEnabledWidgets((prev) => ({
       ...prev,
-      [widgetId]: !prev[widgetId]
+      [widgetId]: !prev[widgetId],
     }));
   }, []);
 
   const updateSettings = useCallback((updates) => {
-    setSettings(prev => ({ ...prev, ...updates }));
+    setSettings((prev) => ({ ...prev, ...updates }));
   }, []);
 
   const updateTodoistConfig = useCallback((updates) => {
-    setTodoistConfig(prev => ({ ...prev, ...updates }));
+    setTodoistConfig((prev) => ({ ...prev, ...updates }));
   }, []);
-
-  const resetWidgetPositions = useCallback(() => {
-    // Clear all widget positions and sizes from storage
-    // Note: This iterates localStorage directly which is fine for current implementation as adapter is local,
-    // but for Drive, we might need a dedicated 'clearPositions' method in storage service.
-    // For now, keeping it simple as widget positions are still somewhat local-specific preferences.
-    Object.keys(localStorage).forEach(key => {
-      if (key.startsWith('chillspace-widget-pos-') || key.startsWith('chillspace-widget-size-')) {
-        localStorage.removeItem(key);
-      }
-    });
-    // Force widgets to remount by changing the key
-    setPositionResetKey(prev => prev + 1);
-  }, []);
-
-  // Save custom spaces to localStorage
-  useEffect(() => {
-    if (!isLoading) storage.set('focusnook-custom-spaces', customSpaces);
-  }, [customSpaces, isLoading]);
 
   const addSpace = useCallback((newSpace) => {
-    setCustomSpaces(prev => [...prev, { ...newSpace, isCustom: true }]);
+    setCustomSpaces((prev) => [...prev, { ...newSpace, isCustom: true }]);
   }, []);
 
   const updateSpace = useCallback((updatedSpace) => {
-    setCustomSpaces(prev => prev.map(s => s.id === updatedSpace.id ? updatedSpace : s));
-    // If the currently selected space was updated, update it immediately
-    if (currentSpace.id === updatedSpace.id) {
+    setCustomSpaces((prev) => prev.map((space) => (space.id === updatedSpace.id ? updatedSpace : space)));
+    if (currentSpace?.id === updatedSpace.id) {
       setCurrentSpace(updatedSpace);
     }
-  }, [currentSpace.id]);
+  }, [currentSpace?.id]);
 
   const deleteSpace = useCallback((spaceId) => {
-    setCustomSpaces(prev => prev.filter(s => s.id !== spaceId));
-    // If current space is deleted, switch to default
-    if (currentSpace.id === spaceId) {
-      setCurrentSpace(defaultSpaces[0]);
+    setCustomSpaces((prev) => prev.filter((space) => space.id !== spaceId));
+    if (currentSpace?.id === spaceId) {
+      const fallback = visibleDefaultSpaces[0] || defaultSpaces[0];
+      setCurrentSpace(fallback);
     }
-  }, [currentSpace.id]);
+  }, [currentSpace?.id, visibleDefaultSpaces]);
 
-  // Keyboard shortcuts
+  const hideAllDefaultSpaces = useCallback(() => {
+    setHiddenDefaultSpaceIds(defaultSpaces.map((space) => space.id));
+  }, []);
+
+  const resetDefaultSpaces = useCallback(() => {
+    setHiddenDefaultSpaceIds([]);
+  }, []);
+
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Don't trigger shortcuts when typing in inputs
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+    const handleKeyDown = (event) => {
+      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
         return;
       }
 
-      switch (e.key.toLowerCase()) {
+      switch (event.key.toLowerCase()) {
         case ' ':
-          e.preventDefault();
-          // Toggle pomodoro play/pause via custom event
+          event.preventDefault();
           window.dispatchEvent(new CustomEvent('pomodoro-toggle'));
           break;
         case 'r':
-          if (!e.metaKey && !e.ctrlKey) {
+          if (!event.metaKey && !event.ctrlKey) {
             window.dispatchEvent(new CustomEvent('pomodoro-reset'));
           }
           break;
@@ -397,7 +802,7 @@ function App() {
           toggleWidgetVisibility('focusprep');
           break;
         case 's':
-          if (!e.metaKey && !e.ctrlKey) {
+          if (!event.metaKey && !event.ctrlKey) {
             setShowSpaceBrowser(true);
           }
           break;
@@ -421,22 +826,14 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [toggleWidgetVisibility]);
 
-  const defaultPositions = {
-    pomodoro: { x: 24, y: 80 },
-    sounds: { x: 24, y: 460 },
-    todos: { x: window.innerWidth - 324, y: 80 },
-    notes: { x: window.innerWidth - 344, y: 460 },
-    planner: { x: window.innerWidth - 344, y: 80 },
-    music: { x: 24, y: 460 },
-    focusprep: { x: 24, y: 300 },
-  };
-
-
+  const layoutOptions = useMemo(
+    () => layouts.map((layout) => ({ id: layout.id, name: layout.name })),
+    [layouts]
+  );
 
   if (isLoading) {
     return (
       <div className="app-loading">
-
         <Loader size={48} className="animate-spin" />
         <p>Loading your space...</p>
         <style>{`
@@ -466,7 +863,6 @@ function App() {
   if (needsDriveAuth) {
     return (
       <div className="app-loading">
-
         <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
           <Music size={48} />
           <h2>Welcome back!</h2>
@@ -474,9 +870,14 @@ function App() {
           <button
             className="connect-btn"
             style={{
-              background: '#22c55e', color: 'white', border: 'none',
-              padding: '12px 24px', borderRadius: '8px', cursor: 'pointer',
-              fontSize: '16px', fontWeight: '500'
+              background: '#22c55e',
+              color: 'white',
+              border: 'none',
+              padding: '12px 24px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '16px',
+              fontWeight: '500',
             }}
             onClick={handleDriveConnect}
           >
@@ -485,19 +886,22 @@ function App() {
 
           <button
             style={{
-              background: 'transparent', color: '#888', border: 'none',
-              marginTop: '10px', cursor: 'pointer', textDecoration: 'underline'
+              background: 'transparent',
+              color: '#888',
+              border: 'none',
+              marginTop: '10px',
+              cursor: 'pointer',
+              textDecoration: 'underline',
             }}
             onClick={() => {
               storage.setAdapter(new LocalStorageAdapter());
               localStorage.removeItem('focusnook-storage-type');
+              setStorageType('local');
               setNeedsDriveAuth(false);
             }}
           >
             Continue with Local Storage
           </button>
-
-
         </div>
         <style>{`
           .app-loading {
@@ -515,22 +919,85 @@ function App() {
     );
   }
 
+  if (requiresFilePermission) {
+    return (
+      <div className="app-loading">
+        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+          <Music size={48} />
+          <h2>Welcome back!</h2>
+          <p>Please reconnect to <strong>{requiresFilePermission}</strong> to load your space.</p>
+          <button
+            className="connect-btn"
+            style={{
+              background: '#22c55e',
+              color: 'white',
+              border: 'none',
+              padding: '12px 24px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontSize: '16px',
+              fontWeight: '500',
+            }}
+            onClick={handleFilePermission}
+          >
+            Reconnect File
+          </button>
+
+          <button
+            style={{
+              background: 'transparent',
+              color: '#888',
+              border: 'none',
+              marginTop: '10px',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+            }}
+            onClick={() => {
+              storage.setAdapter(new LocalStorageAdapter());
+              localStorage.removeItem('focusnook-storage-type');
+              setStorageType('local');
+              setRequiresFilePermission(false);
+              loadData();
+            }}
+          >
+            Continue with Local Storage
+          </button>
+        </div>
+        <style>{`
+          .app-loading {
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #111;
+            color: #fff;
+          }
+        `}</style>
+      </div>
+    );
+  }
+
+  const pomodoroFrame = getWidgetFrame(activeLayout, 'pomodoro');
+  const soundsFrame = getWidgetFrame(activeLayout, 'sounds');
+  const todosFrame = getWidgetFrame(activeLayout, 'todos');
+  const notesFrame = getWidgetFrame(activeLayout, 'notes');
+  const plannerFrame = getWidgetFrame(activeLayout, 'planner');
+  const musicFrame = getWidgetFrame(activeLayout, 'music');
+  const focusPrepFrame = getWidgetFrame(activeLayout, 'focusprep');
+
   return (
     <div className="app">
-
-      {/* Video Background */}
       <VideoBackground youtubeId={currentSpace.youtubeId} />
 
-      {/* Current Space Label */}
       <div className="current-space">
         <span className="space-name">{currentSpace.name}</span>
       </div>
 
-      {/* Clock */}
       {settings.showClock && (
         <div className="clock-container">
           <Clock use12Hour={settings.use12Hour} />
-          {/* Now Playing indicator */}
           {musicState.isPlaying && musicState.selectedStream && (
             <div className="now-playing-indicator">
               <Music size={14} />
@@ -540,43 +1007,56 @@ function App() {
         </div>
       )}
 
-      {/* Draggable Widgets */}
       {widgetVisibility.pomodoro && (
         <DraggableWidget
-          key={`pomodoro-${positionResetKey}`}
           widgetId="pomodoro"
-          defaultPosition={defaultPositions.pomodoro}
+          position={pomodoroFrame.position}
+          size={pomodoroFrame.size}
+          defaultPosition={pomodoroFrame.position}
+          defaultSize={pomodoroFrame.size}
+          minWidth={300}
+          minHeight={450}
           zIndex={widgetZIndices.pomodoro || 10}
           onBringToFront={bringWidgetToFront}
+          onLayoutChange={handleWidgetLayoutChange}
           disableResize
         >
           <div style={{ opacity: settings.widgetOpacity }}>
-            <Pomodoro ref={pomodoroRef} />
+            <Pomodoro
+              isMuted={Boolean(settings.pomodoroMuted)}
+              onMuteChange={(muted) => updateSettings({ pomodoroMuted: muted })}
+            />
           </div>
         </DraggableWidget>
       )}
 
-      {/* {widgetVisibility.sounds && (
+      {widgetVisibility.sounds && (
         <DraggableWidget
-          key={`sounds-${positionResetKey}`}
           widgetId="sounds"
-          defaultPosition={defaultPositions.sounds}
+          position={soundsFrame.position}
+          size={soundsFrame.size}
+          defaultPosition={soundsFrame.position}
+          defaultSize={soundsFrame.size}
           zIndex={widgetZIndices.sounds || 10}
           onBringToFront={bringWidgetToFront}
+          onLayoutChange={handleWidgetLayoutChange}
         >
           <div style={{ opacity: settings.widgetOpacity }}>
             <AmbientSounds />
           </div>
         </DraggableWidget>
-      )} */}
+      )}
 
       {widgetVisibility.todos && (
         <DraggableWidget
-          key={`todos-${positionResetKey}`}
           widgetId="todos"
-          defaultPosition={defaultPositions.todos}
+          position={todosFrame.position}
+          size={todosFrame.size}
+          defaultPosition={todosFrame.position}
+          defaultSize={todosFrame.size}
           zIndex={widgetZIndices.todos || 10}
           onBringToFront={bringWidgetToFront}
+          onLayoutChange={handleWidgetLayoutChange}
         >
           <div style={{ opacity: settings.widgetOpacity }}>
             <TodoList todoistConfig={todoistConfig} />
@@ -586,11 +1066,14 @@ function App() {
 
       {widgetVisibility.notes && (
         <DraggableWidget
-          key={`notes-${positionResetKey}`}
           widgetId="notes"
-          defaultPosition={defaultPositions.notes}
+          position={notesFrame.position}
+          size={notesFrame.size}
+          defaultPosition={notesFrame.position}
+          defaultSize={notesFrame.size}
           zIndex={widgetZIndices.notes || 10}
           onBringToFront={bringWidgetToFront}
+          onLayoutChange={handleWidgetLayoutChange}
         >
           <div style={{ opacity: settings.widgetOpacity }}>
             <Notes />
@@ -600,11 +1083,14 @@ function App() {
 
       {widgetVisibility.planner && (
         <DraggableWidget
-          key={`planner-${positionResetKey}`}
           widgetId="planner"
-          defaultPosition={defaultPositions.planner}
+          position={plannerFrame.position}
+          size={plannerFrame.size}
+          defaultPosition={plannerFrame.position}
+          defaultSize={plannerFrame.size}
           zIndex={widgetZIndices.planner || 10}
           onBringToFront={bringWidgetToFront}
+          onLayoutChange={handleWidgetLayoutChange}
         >
           <div style={{ opacity: settings.widgetOpacity }}>
             <DailyPlanner
@@ -617,12 +1103,18 @@ function App() {
 
       {widgetVisibility.music && (
         <DraggableWidget
-          key={`music-${positionResetKey}`}
           widgetId="music"
-          defaultPosition={defaultPositions.music}
+          position={musicFrame.position}
+          size={musicFrame.size}
+          defaultPosition={musicFrame.position}
+          defaultSize={musicFrame.size}
+          minWidth={320}
+          minHeight={250}
+          allowOverflow
           disableResize
           zIndex={widgetZIndices.music || 10}
           onBringToFront={bringWidgetToFront}
+          onLayoutChange={handleWidgetLayoutChange}
         >
           <div style={{ opacity: settings.widgetOpacity }}>
             <MusicPlayer musicState={musicState} onMusicStateChange={updateMusicState} />
@@ -632,11 +1124,14 @@ function App() {
 
       {widgetVisibility.focusprep && (
         <DraggableWidget
-          key={`focusprep-${positionResetKey}`}
           widgetId="focusprep"
-          defaultPosition={defaultPositions.focusprep}
+          position={focusPrepFrame.position}
+          size={focusPrepFrame.size}
+          defaultPosition={focusPrepFrame.position}
+          defaultSize={focusPrepFrame.size}
           zIndex={widgetZIndices.focusprep || 10}
           onBringToFront={bringWidgetToFront}
+          onLayoutChange={handleWidgetLayoutChange}
         >
           <div style={{ opacity: settings.widgetOpacity }}>
             <FocusPrep />
@@ -644,7 +1139,6 @@ function App() {
         </DraggableWidget>
       )}
 
-      {/* Persistent YouTube Player (outside widget for continuous playback) */}
       {musicState.isPlaying && musicState.selectedStream && (
         <div className="persistent-music-player">
           <YouTubePlayer
@@ -653,24 +1147,20 @@ function App() {
             volume={musicState.volume ?? 50}
             isMuted={musicState.isMuted ?? false}
             onStateChange={(state) => {
-              // Sync player state with app state to ensuring UI reflects reality
-              // 1 = Playing
               const isPlaying = state === 1;
-              // 2 = Paused, 0 = Ended
               const isPausedOrEnded = state === 2 || state === 0;
 
               if (isPlaying && !musicState.isPlaying) {
-                setMusicState(prev => ({ ...prev, isPlaying: true }));
+                setMusicState((prev) => ({ ...prev, isPlaying: true }));
               }
               if (isPausedOrEnded && musicState.isPlaying) {
-                setMusicState(prev => ({ ...prev, isPlaying: false }));
+                setMusicState((prev) => ({ ...prev, isPlaying: false }));
               }
             }}
           />
         </div>
       )}
 
-      {/* Navigation Dock */}
       <NavigationDock
         enabledWidgets={enabledWidgets}
         widgetVisibility={widgetVisibility}
@@ -679,46 +1169,46 @@ function App() {
         onOpenSettings={() => setShowSettings(true)}
       />
 
-      {/* Space Browser Modal */}
-      {
-        showSpaceBrowser && (
-          <SpaceBrowser
-            spaces={allSpaces}
-            currentSpaceId={currentSpace.id}
-            onSelectSpace={setCurrentSpace}
-            onClose={() => setShowSpaceBrowser(false)}
-            onAddSpace={addSpace}
-            onUpdateSpace={updateSpace}
-            onDeleteSpace={deleteSpace}
-          />
-        )
-      }
+      {showSpaceBrowser && (
+        <SpaceBrowser
+          spaces={allSpaces}
+          currentSpaceId={currentSpace.id}
+          onSelectSpace={setCurrentSpace}
+          onClose={() => setShowSpaceBrowser(false)}
+          onAddSpace={addSpace}
+          onUpdateSpace={updateSpace}
+          onDeleteSpace={deleteSpace}
+          hasVisibleDefaultSpaces={visibleDefaultSpaces.length > 0}
+          hasHiddenDefaultSpaces={hiddenDefaultSpaceIds.length > 0}
+          onHideAllDefaultSpaces={hideAllDefaultSpaces}
+          onResetDefaultSpaces={resetDefaultSpaces}
+        />
+      )}
 
-      {/* Settings Panel */}
-      {
-        showSettings && (
-          <SettingsPanel
-            settings={settings}
-            enabledWidgets={enabledWidgets}
-            todoistConfig={todoistConfig}
-            storageType={storageType}
-            onUpdateSettings={updateSettings}
-            onUpdateTodoistConfig={updateTodoistConfig}
-            onToggleWidgetEnabled={toggleWidgetEnabled}
-            onClose={() => setShowSettings(false)}
-            onResetPositions={resetWidgetPositions}
-            onDriveConnected={() => {
-              // Explicitly save the type FIRST
-              localStorage.setItem('focusnook-storage-type', 'gdrive');
-              storage.setAdapter(googleDriveAdapter);
-              setStorageType('gdrive');
-              setNeedsDriveAuth(false);
-              loadData();
-              alert("Connected! Data will sync automatically.");
-            }}
-          />
-        )
-      }
+      {showSettings && (
+        <SettingsPanel
+          settings={settings}
+          enabledWidgets={enabledWidgets}
+          todoistConfig={todoistConfig}
+          storageType={storageType}
+          layouts={layoutOptions}
+          activeLayoutId={activeLayoutId}
+          layoutPresets={LAYOUT_PRESETS}
+          onStorageModeChange={handleStorageModeChange}
+          onRequestDataSnapshot={snapshotAppData}
+          onUpdateSettings={updateSettings}
+          onUpdateTodoistConfig={updateTodoistConfig}
+          onToggleWidgetEnabled={toggleWidgetEnabled}
+          onClose={() => setShowSettings(false)}
+          onResetPositions={resetActiveLayout}
+          onActivateLayout={activateLayout}
+          onSaveCurrentLayout={saveCurrentLayout}
+          onSaveLayoutAs={saveLayoutAs}
+          onRenameLayout={renameLayout}
+          onDeleteLayout={deleteLayout}
+          onApplyLayoutPreset={applyLayoutPreset}
+        />
+      )}
 
       <style>{`
         .app {
@@ -727,14 +1217,14 @@ function App() {
           position: relative;
           overflow: hidden;
         }
-        
+
         .current-space {
           position: fixed;
           top: var(--space-6);
           left: var(--space-6);
           z-index: var(--z-widget);
         }
-        
+
         .space-name {
           font-size: var(--font-size-sm);
           font-weight: 500;
@@ -745,7 +1235,7 @@ function App() {
           border-radius: var(--radius-full);
           border: 1px solid var(--glass-border);
         }
-        
+
         .clock-container {
           position: fixed;
           top: 50%;
@@ -758,7 +1248,7 @@ function App() {
           align-items: center;
           gap: var(--space-3);
         }
-        
+
         .now-playing-indicator {
           display: flex;
           align-items: center;
@@ -772,11 +1262,11 @@ function App() {
           color: var(--color-text-secondary);
           animation: fadeIn 0.3s ease-out;
         }
-        
+
         .now-playing-indicator svg {
           color: var(--color-accent);
         }
-        
+
         .persistent-music-player {
           position: fixed;
           bottom: -9999px;
@@ -786,13 +1276,13 @@ function App() {
           opacity: 0;
           pointer-events: none;
         }
-        
+
         .persistent-music-player iframe {
           width: 100%;
           height: 100%;
         }
       `}</style>
-    </div >
+    </div>
   );
 }
 

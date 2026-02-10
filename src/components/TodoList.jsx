@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Check, Trash2, GripVertical, RefreshCw, Cloud, CloudOff, Target } from 'lucide-react';
+import { Plus, Check, Trash2, GripVertical, RefreshCw, Cloud, Target } from 'lucide-react';
 import * as todoistApi from '../services/todoistApi';
 import { storage } from '../services/storage';
 
@@ -54,7 +54,7 @@ export default function TodoList({ todoistConfig }) {
   // Save local todos
   useEffect(() => {
     if (!isConnected && !isStorageLoading) {
-      storage.set('chillspace-todos', localTodos);
+      storage.set('focusnook-todos', localTodos);
     }
   }, [localTodos, isConnected, isStorageLoading]);
 
@@ -62,7 +62,7 @@ export default function TodoList({ todoistConfig }) {
   // Save focus task
   useEffect(() => {
     if (!isStorageLoading) {
-      storage.set('chillspace-focus-task', focusTaskId);
+      storage.set('focusnook-focus-task', focusTaskId);
     }
   }, [focusTaskId, isStorageLoading]);
 
@@ -70,7 +70,7 @@ export default function TodoList({ todoistConfig }) {
   // Save local task order
   useEffect(() => {
     if (localTaskOrder.length > 0 && !isStorageLoading) {
-      storage.set('chillspace-todoist-order', localTaskOrder);
+      storage.set('focusnook-todoist-order', localTaskOrder);
     }
   }, [localTaskOrder, isStorageLoading]);
 
@@ -196,8 +196,6 @@ export default function TodoList({ todoistConfig }) {
       })
       : todoistTodos)
     : localTodos;
-  const setTodos = isConnected ? setTodoistTodos : setLocalTodos;
-
   const addTodo = async (e) => {
     e.preventDefault();
     if (!newTodo.trim()) return;
@@ -212,7 +210,7 @@ export default function TodoList({ todoistConfig }) {
         };
         const task = await todoistApi.createTask(todoistConfig.token, newTodo.trim(), options);
         setTodoistTodos(prev => [...prev, task]);
-      } catch (err) {
+      } catch {
         setError('Failed to add task');
       }
       setIsLoading(false);
@@ -241,7 +239,7 @@ export default function TodoList({ todoistConfig }) {
         } else {
           await todoistApi.closeTask(todoistConfig.token, id);
         }
-      } catch (err) {
+      } catch {
         // Revert on error
         setTodoistTodos(prev => prev.map(t =>
           t.id === id ? { ...t, completed: todo.completed } : t
@@ -263,7 +261,7 @@ export default function TodoList({ todoistConfig }) {
 
       try {
         await todoistApi.deleteTask(todoistConfig.token, id);
-      } catch (err) {
+      } catch {
         // Revert on error
         setTodoistTodos(prevTodos);
         setError('Failed to delete task');

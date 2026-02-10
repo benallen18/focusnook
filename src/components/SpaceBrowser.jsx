@@ -1,7 +1,19 @@
 import { useState } from 'react';
-import { X, Plus, Edit2, Trash2, Check, ExternalLink } from 'lucide-react';
+import { X, Plus, Edit2, Trash2, Check, ExternalLink, RotateCcw, EyeOff } from 'lucide-react';
 
-export default function SpaceBrowser({ spaces, currentSpaceId, onSelectSpace, onClose, onAddSpace, onUpdateSpace, onDeleteSpace }) {
+export default function SpaceBrowser({
+  spaces,
+  currentSpaceId,
+  onSelectSpace,
+  onClose,
+  onAddSpace,
+  onUpdateSpace,
+  onDeleteSpace,
+  hasVisibleDefaultSpaces = false,
+  hasHiddenDefaultSpaces = false,
+  onHideAllDefaultSpaces,
+  onResetDefaultSpaces,
+}) {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
   const [categoryRename, setCategoryRename] = useState('');
@@ -113,6 +125,26 @@ export default function SpaceBrowser({ spaces, currentSpaceId, onSelectSpace, on
             <h2>Choose Your Space</h2>
           </div>
           <div className="header-actions">
+            {isEditMode && hasVisibleDefaultSpaces && (
+              <button
+                className="btn-secondary header-action-btn"
+                onClick={() => onHideAllDefaultSpaces?.()}
+                type="button"
+              >
+                <EyeOff size={14} />
+                Hide Defaults
+              </button>
+            )}
+            {isEditMode && hasHiddenDefaultSpaces && (
+              <button
+                className="btn-secondary header-action-btn"
+                onClick={() => onResetDefaultSpaces?.()}
+                type="button"
+              >
+                <RotateCcw size={14} />
+                Reset Defaults
+              </button>
+            )}
             <button
               className={`btn-secondary edit-mode-btn ${isEditMode ? 'active' : ''}`}
               onClick={() => setIsEditMode(!isEditMode)}
@@ -390,6 +422,12 @@ export default function SpaceBrowser({ spaces, currentSpaceId, onSelectSpace, on
             display: flex;
             align-items: center;
             gap: var(--space-4);
+        }
+
+        .header-action-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
         }
         
         .close-btn {

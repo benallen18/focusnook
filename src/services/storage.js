@@ -21,7 +21,7 @@ class LocalStorageAdapter {
                 // Attempt to parse JSON, if fails return raw string or null
                 try {
                     resolve(item ? JSON.parse(item) : null);
-                } catch (e) {
+                } catch {
                     resolve(item);
                 }
             } catch (error) {
@@ -50,30 +50,73 @@ class LocalStorageAdapter {
             resolve();
         });
     }
+
+    async getAll(keys = []) {
+        const result = {};
+        for (const key of keys) {
+            result[key] = await this.getItem(key);
+        }
+        return result;
+    }
+
+    async setAll(entries = {}) {
+        for (const [key, value] of Object.entries(entries)) {
+            await this.setItem(key, value);
+        }
+    }
 }
+
+const getAdapterType = (adapter) => {
+    const name = adapter?.constructor?.name;
+    if (name === 'GoogleDriveAdapter') return 'gdrive';
+    if (name === 'LocalFileAdapter') return 'localfile';
+    return 'local';
+};
 
 // Singleton instance management
 let currentAdapter = new LocalStorageAdapter();
-let adapterType = 'local'; // 'local' or 'gdrive'
+let adapterType = 'local'; // 'local' | 'gdrive' | 'localfile'
 
 export const storage = {
     get: (key) => currentAdapter.getItem(key),
     set: (key, value) => currentAdapter.setItem(key, value),
     remove: (key) => currentAdapter.removeItem(key),
+    getAll: async (keys = []) => {
+        if (typeof currentAdapter.getAll === 'function') {
+            return currentAdapter.getAll(keys);
+        }
+
+        const result = {};
+        for (const key of keys) {
+            result[key] = await currentAdapter.getItem(key);
+        }
+        return result;
+    },
+    setAll: async (entries = {}) => {
+        if (typeof currentAdapter.setAll === 'function') {
+            await currentAdapter.setAll(entries);
+            return;
+        }
+
+        for (const [key, value] of Object.entries(entries)) {
+            await currentAdapter.setItem(key, value);
+        }
+    },
 
     // Method to switch adapters (will be used when connecting to Drive)
     setAdapter: (adapter) => {
         currentAdapter = adapter;
-        adapterType = adapter.constructor.name === 'GoogleDriveAdapter' ? 'gdrive' : 'local';
+        adapterType = getAdapterType(adapter);
         // Persist choice so it survives reloads (simple generic mechanism)
         if (adapterType === 'local') {
             localStorage.removeItem('focusnook-storage-type');
         } else {
-            localStorage.setItem('focusnook-storage-type', 'gdrive');
+            localStorage.setItem('focusnook-storage-type', adapterType);
         }
     },
 
     getType: () => adapterType,
+    getAdapter: () => currentAdapter,
 };
 
 export { LocalStorageAdapter };

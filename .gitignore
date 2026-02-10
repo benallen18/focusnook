@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Server token cache (local dev)
+server/data/
+.vercel
+.env

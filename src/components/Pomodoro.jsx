@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, RotateCcw, Settings } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings, Volume2, VolumeX } from 'lucide-react';
 
-export default function Pomodoro() {
+export default function Pomodoro({ isMuted = false, onMuteChange }) {
     const [mode, setMode] = useState('work'); // 'work' or 'break'
     const [isRunning, setIsRunning] = useState(false);
     const [timeLeft, setTimeLeft] = useState(25 * 60);
@@ -16,6 +16,9 @@ export default function Pomodoro() {
 
     // Create a synthesized notification sound using Web Audio API
     const playNotificationSound = useCallback(() => {
+        if (isMuted) {
+            return;
+        }
         try {
             if (!audioContextRef.current) {
                 audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -49,10 +52,10 @@ export default function Pomodoro() {
             // Play a pleasant two-tone notification
             playTone(523.25, now, 0.2);        // C5
             playTone(659.25, now + 0.2, 0.3);  // E5
-        } catch (e) {
+        } catch {
             console.log('Audio notification not available');
         }
-    }, []);
+    }, [isMuted]);
 
     const totalTime = mode === 'work'
         ? settings.workDuration * 60
@@ -165,6 +168,17 @@ export default function Pomodoro() {
                             min="1"
                             max="60"
                         />
+                    </div>
+                    <div className="setting-row">
+                        <label>Notification Sound</label>
+                        <button
+                            className={`sound-toggle-btn ${isMuted ? 'muted' : ''}`}
+                            onClick={() => onMuteChange?.(!isMuted)}
+                            type="button"
+                        >
+                            {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                            {isMuted ? 'Muted' : 'On'}
+                        </button>
                     </div>
                 </div>
             ) : (
@@ -369,6 +383,23 @@ export default function Pomodoro() {
           width: 80px;
           text-align: center;
           padding: var(--space-2);
+        }
+
+        .sound-toggle-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: var(--space-2);
+          padding: var(--space-2) var(--space-3);
+          border: 1px solid var(--color-border);
+          border-radius: var(--radius-md);
+          color: var(--color-text);
+          background: var(--color-surface);
+          font-size: var(--font-size-sm);
+        }
+
+        .sound-toggle-btn.muted {
+          color: var(--color-text-muted);
+          border-color: var(--color-border-hover);
         }
       `}</style>
         </div>

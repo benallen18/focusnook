@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, X, Clock, Calendar } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Plus, X, Calendar } from 'lucide-react';
 import { storage } from '../services/storage';
 
 // Parse duration string like "1h30m", "45m", "2h" into minutes
@@ -36,7 +36,7 @@ function formatTime(minutes) {
   return mins > 0 ? `${displayHours}:${mins.toString().padStart(2, '0')} ${period}` : `${displayHours} ${period}`;
 }
 
-const HOUR_HEIGHT = 60; // pixels per hour
+const MIN_HOUR_HEIGHT = 56;
 
 export default function DailyPlanner({ startHour = 9, endHour = 17 }) {
   // Calculate total hours based on props
@@ -47,37 +47,44 @@ export default function DailyPlanner({ startHour = 9, endHour = 17 }) {
   const [isLoading, setIsLoading] = useState(true);
   const [events, setEvents] = useState([]);
 
-  // Load saved events
-  useEffect(() => {
-    storage.get('chillspace-planner').then(saved => {
-      if (saved) {
-        // Only keep events from today
-        const today = new Date().toDateString();
-        setEvents(saved.filter(e => e.date === today));
-      }
-      setIsLoading(false);
-    });
-  }, []);
-
   const [showAddForm, setShowAddForm] = useState(false);
   const [newEvent, setNewEvent] = useState({ name: '', time: '', duration: '' });
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [hourHeight, setHourHeight] = useState(60);
+  const timelineContainerRef = useRef(null);
 
   // Load saved events
   useEffect(() => {
     const loadEvents = async () => {
       const saved = await storage.get('focusnook-events');
-      if (saved) {
-        setEvents(saved.map(e => ({
-          ...e,
-          start: new Date(e.start),
-          end: new Date(e.end)
-        })));
+      if (Array.isArray(saved)) {
+        setEvents(saved);
       }
       setIsLoading(false); // Keep isLoading logic
     };
     loadEvents();
   }, []);
+
+  useEffect(() => {
+    const element = timelineContainerRef.current;
+    if (!element || totalHours <= 0) return undefined;
+
+    const recalculateHourHeight = () => {
+      const styles = window.getComputedStyle(element);
+      const paddingTop = Number.parseFloat(styles.paddingTop || '0') || 0;
+      const paddingBottom = Number.parseFloat(styles.paddingBottom || '0') || 0;
+      const availableHeight = element.clientHeight - paddingTop - paddingBottom;
+      if (!availableHeight) return;
+      const proposed = availableHeight / totalHours;
+      setHourHeight(Math.max(MIN_HOUR_HEIGHT, proposed));
+    };
+
+    recalculateHourHeight();
+    const observer = new ResizeObserver(recalculateHourHeight);
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, [totalHours]);
 
   // Update current time every minute
   useEffect(() => {
@@ -137,7 +144,7 @@ export default function DailyPlanner({ startHour = 9, endHour = 17 }) {
   };
 
   // Calculate position for current time indicator
-  const currentTimeOffset = ((nowMinutes - dayStartMinutes) / 60) * HOUR_HEIGHT;
+  const currentTimeOffset = ((nowMinutes - dayStartMinutes) / 60) * hourHeight;
   const showTimeIndicator = nowMinutes >= dayStartMinutes && nowMinutes <= dayEndMinutes;
 
   // Hour labels
@@ -190,14 +197,14 @@ export default function DailyPlanner({ startHour = 9, endHour = 17 }) {
       )}
 
       {/* Timeline */}
-      <div className="timeline-container">
-        <div className="timeline" style={{ height: totalHours * HOUR_HEIGHT }}>
+      <div className="timeline-container" ref={timelineContainerRef}>
+        <div className="timeline" style={{ height: totalHours * hourHeight }}>
           {/* Hour lines */}
           {hours.map((hour, i) => (
             <div
               key={hour}
               className="hour-line"
-              style={{ top: i * HOUR_HEIGHT }}
+              style={{ top: i * hourHeight }}
             >
               <span className="hour-label">{formatTime(hour * 60)}</span>
               <div className="hour-divider" />
@@ -216,10 +223,10 @@ export default function DailyPlanner({ startHour = 9, endHour = 17 }) {
               const status = getEventStatus(event);
 
               // Calculate position based on start time (exact position)
-              const top = ((event.startMinutes - dayStartMinutes) / 60) * HOUR_HEIGHT;
+              const top = ((event.startMinutes - dayStartMinutes) / 60) * hourHeight;
 
               // Calculate height based on duration (exact height)
-              const height = (event.durationMinutes / 60) * HOUR_HEIGHT;
+              const height = (event.durationMinutes / 60) * hourHeight;
 
               // Short events get compact layout
               const isCompact = event.durationMinutes < 45;

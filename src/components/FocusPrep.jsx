@@ -1,22 +1,33 @@
 import { useState, useEffect } from 'react';
 import { Check, Plus, Trash2, Zap, RotateCcw } from 'lucide-react';
+import { storage } from '../services/storage';
 
 const defaultChecklist = [
   { id: 1, text: 'Add your Pre-Focus Routine items here', completed: false },
 ];
 
 export default function FocusPrep() {
-  const [items, setItems] = useState(() => {
-    const saved = localStorage.getItem('chillspace-focus-prep');
-    return saved ? JSON.parse(saved) : defaultChecklist;
-  });
+  const [items, setItems] = useState(defaultChecklist);
+  const [isLoading, setIsLoading] = useState(true);
   const [newItem, setNewItem] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
-  // Save to localStorage
   useEffect(() => {
-    localStorage.setItem('chillspace-focus-prep', JSON.stringify(items));
-  }, [items]);
+    const loadItems = async () => {
+      const saved = await storage.get('focusnook-focus-prep');
+      if (Array.isArray(saved)) {
+        setItems(saved);
+      }
+      setIsLoading(false);
+    };
+    loadItems();
+  }, []);
+
+  useEffect(() => {
+    if (!isLoading) {
+      storage.set('focusnook-focus-prep', items);
+    }
+  }, [isLoading, items]);
 
   const toggleItem = (id) => {
     setItems(prev => prev.map(item =>

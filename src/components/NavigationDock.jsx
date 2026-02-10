@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 // Widget configuration with icons
 const WIDGET_CONFIG = {
   pomodoro: { icon: Timer, label: 'Timer' },
-  // sounds: { icon: Volume2, label: 'Sounds' },
+  sounds: { icon: Volume2, label: 'Sounds' },
   todos: { icon: CheckSquare, label: 'Tasks' },
   notes: { icon: FileText, label: 'Notes' },
   planner: { icon: Calendar, label: 'Planner' },

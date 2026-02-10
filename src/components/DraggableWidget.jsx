@@ -1,166 +1,263 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import { GripHorizontal } from 'lucide-react';
 
-export default function DraggableWidget({ children, defaultPosition, defaultSize, widgetId, minWidth = 200, minHeight = 150, disableResize = false, zIndex = 10, onBringToFront }) {
-    const [position, setPosition] = useState(() => {
-        const saved = localStorage.getItem(`chillspace-widget-pos-${widgetId}`);
-        return saved ? JSON.parse(saved) : defaultPosition;
+const BOTTOM_DOCK_OFFSET = 80;
+const VIEWPORT_PADDING = 20;
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const toNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+export default function DraggableWidget({
+  children,
+  defaultPosition,
+  defaultSize,
+  widgetId,
+  position,
+  size,
+  minWidth = 200,
+  minHeight = 150,
+  disableResize = false,
+  allowOverflow = false,
+  zIndex = 10,
+  onBringToFront,
+  onLayoutChange,
+}) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const dragRef = useRef(null);
+  const offsetRef = useRef({ x: 0, y: 0 });
+  const startSizeRef = useRef({ width: 0, height: 0 });
+  const startPosRef = useRef({ x: 0, y: 0 });
+  const positionRef = useRef(position || defaultPosition || { x: 0, y: 0 });
+  const sizeRef = useRef(size || defaultSize || null);
+
+  useEffect(() => {
+    positionRef.current = position || defaultPosition || { x: 0, y: 0 };
+  }, [position, defaultPosition]);
+
+  useEffect(() => {
+    sizeRef.current = size || defaultSize || null;
+  }, [size, defaultSize]);
+
+  const emitLayoutChange = useCallback((nextPosition, nextSize) => {
+    if (!onLayoutChange) return;
+    onLayoutChange({
+      widgetId,
+      position: nextPosition,
+      size: nextSize,
     });
+  }, [onLayoutChange, widgetId]);
 
-    const [size, setSize] = useState(() => {
-        const saved = localStorage.getItem(`chillspace-widget-size-${widgetId}`);
-        return saved ? JSON.parse(saved) : defaultSize || null;
-    });
+  const resolvedPosition = useMemo(() => (position || defaultPosition || { x: 0, y: 0 }), [position, defaultPosition]);
+  const resolvedSize = useMemo(() => (size || defaultSize || null), [size, defaultSize]);
 
-    const [isDragging, setIsDragging] = useState(false);
-    const [isResizing, setIsResizing] = useState(false);
-    const dragRef = useRef(null);
-    const offsetRef = useRef({ x: 0, y: 0 });
-    const startSizeRef = useRef({ width: 0, height: 0 });
-    const startPosRef = useRef({ x: 0, y: 0 });
+  const handleMouseDown = (event) => {
+    if (onBringToFront) {
+      onBringToFront(widgetId);
+    }
 
-    // Save position
-    useEffect(() => {
-        localStorage.setItem(`chillspace-widget-pos-${widgetId}`, JSON.stringify(position));
-    }, [position, widgetId]);
+    if (event.target.closest('.resize-handle')) {
+      setIsResizing(true);
+      const rect = dragRef.current.getBoundingClientRect();
+      startSizeRef.current = { width: rect.width, height: rect.height };
+      startPosRef.current = { x: event.clientX, y: event.clientY };
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
 
-    // Save size
-    useEffect(() => {
-        if (size) {
-            localStorage.setItem(`chillspace-widget-size-${widgetId}`, JSON.stringify(size));
-        }
-    }, [size, widgetId]);
+    if (event.target.closest('.drag-handle-zone')) {
+      setIsDragging(true);
+      const rect = dragRef.current.getBoundingClientRect();
+      offsetRef.current = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+      event.preventDefault();
+    }
+  };
 
-    const handleMouseDown = (e) => {
-        // Bring widget to front when clicked anywhere
-        if (onBringToFront) {
-            onBringToFront(widgetId);
-        }
+  const handleMouseMove = useCallback((event) => {
+    if (isDragging) {
+      const currentSize = sizeRef.current;
+      const widgetWidth = currentSize?.width || dragRef.current?.offsetWidth || 0;
+      const widgetHeight = currentSize?.height || dragRef.current?.offsetHeight || 0;
+      const maxX = Math.max(0, window.innerWidth - widgetWidth);
+      const maxY = Math.max(0, window.innerHeight - widgetHeight - BOTTOM_DOCK_OFFSET);
 
-        if (e.target.closest('.resize-handle')) {
-            // Start resizing
-            setIsResizing(true);
-            const rect = dragRef.current.getBoundingClientRect();
-            startSizeRef.current = { width: rect.width, height: rect.height };
-            startPosRef.current = { x: e.clientX, y: e.clientY };
-            e.preventDefault();
-            e.stopPropagation();
-        } else if (e.target.closest('.drag-handle-zone')) {
-            // Start dragging
-            setIsDragging(true);
-            const rect = dragRef.current.getBoundingClientRect();
-            offsetRef.current = {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top
-            };
-            e.preventDefault();
-        }
+      const nextPosition = {
+        x: clamp(event.clientX - offsetRef.current.x, 0, maxX),
+        y: clamp(event.clientY - offsetRef.current.y, 0, maxY),
+      };
+
+      positionRef.current = nextPosition;
+      emitLayoutChange(nextPosition, currentSize);
+    }
+
+    if (isResizing && !disableResize) {
+      const deltaX = event.clientX - startPosRef.current.x;
+      const deltaY = event.clientY - startPosRef.current.y;
+
+      const nextSize = {
+        width: Math.max(minWidth, startSizeRef.current.width + deltaX),
+        height: Math.max(minHeight, startSizeRef.current.height + deltaY),
+      };
+
+      const currentPosition = positionRef.current || { x: 0, y: 0 };
+      const maxWidth = Math.max(minWidth, window.innerWidth - currentPosition.x - VIEWPORT_PADDING);
+      const maxHeight = Math.max(minHeight, window.innerHeight - currentPosition.y - BOTTOM_DOCK_OFFSET - VIEWPORT_PADDING);
+
+      const clampedSize = {
+        width: Math.min(nextSize.width, maxWidth),
+        height: Math.min(nextSize.height, maxHeight),
+      };
+
+      sizeRef.current = clampedSize;
+      emitLayoutChange(currentPosition, clampedSize);
+    }
+  }, [disableResize, emitLayoutChange, isDragging, isResizing, minHeight, minWidth]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+    setIsResizing(false);
+  }, []);
+
+  const clampWithinViewport = useCallback(() => {
+    const element = dragRef.current;
+    const currentPosition = positionRef.current || defaultPosition || { x: 0, y: 0 };
+    const currentSize = sizeRef.current;
+
+    let nextSize = currentSize;
+    if (currentSize) {
+      const minAllowedWidth = Math.max(120, minWidth);
+      const minAllowedHeight = Math.max(120, minHeight);
+      const maxWidth = Math.max(minAllowedWidth, window.innerWidth - VIEWPORT_PADDING);
+      const maxHeight = Math.max(minAllowedHeight, window.innerHeight - BOTTOM_DOCK_OFFSET - VIEWPORT_PADDING);
+
+      nextSize = {
+        width: Math.min(Math.max(toNumber(currentSize.width, minAllowedWidth), minAllowedWidth), maxWidth),
+        height: Math.min(Math.max(toNumber(currentSize.height, minAllowedHeight), minAllowedHeight), maxHeight),
+      };
+    }
+
+    const width = nextSize?.width || element?.offsetWidth || 0;
+    const height = nextSize?.height || element?.offsetHeight || 0;
+    const maxX = Math.max(0, window.innerWidth - width);
+    const maxY = Math.max(0, window.innerHeight - height - BOTTOM_DOCK_OFFSET);
+
+    const nextPosition = {
+      x: clamp(toNumber(currentPosition.x), 0, maxX),
+      y: clamp(toNumber(currentPosition.y), 0, maxY),
     };
 
-    const handleMouseMove = useCallback((e) => {
-        if (isDragging) {
-            const newX = e.clientX - offsetRef.current.x;
-            const newY = e.clientY - offsetRef.current.y;
+    const sizeChanged = !!nextSize && (
+      !currentSize
+      || nextSize.width !== currentSize.width
+      || nextSize.height !== currentSize.height
+    );
+    const positionChanged = nextPosition.x !== currentPosition.x || nextPosition.y !== currentPosition.y;
 
-            const rect = dragRef.current.getBoundingClientRect();
-            const maxX = window.innerWidth - rect.width;
-            const maxY = window.innerHeight - rect.height - 80;
+    if (sizeChanged || positionChanged) {
+      positionRef.current = nextPosition;
+      sizeRef.current = nextSize;
+      emitLayoutChange(nextPosition, nextSize);
+    }
+  }, [defaultPosition, disableResize, emitLayoutChange, minHeight, minWidth]);
 
-            setPosition({
-                x: Math.max(0, Math.min(newX, maxX)),
-                y: Math.max(0, Math.min(newY, maxY))
-            });
-        }
+  useEffect(() => {
+    if (!isDragging && !isResizing) return undefined;
 
-        if (isResizing) {
-            const deltaX = e.clientX - startPosRef.current.x;
-            const deltaY = e.clientY - startPosRef.current.y;
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [handleMouseMove, handleMouseUp, isDragging, isResizing]);
 
-            const newWidth = Math.max(minWidth, startSizeRef.current.width + deltaX);
-            const newHeight = Math.max(minHeight, startSizeRef.current.height + deltaY);
+  useEffect(() => {
+    const handleResize = () => clampWithinViewport();
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
 
-            // Constrain to viewport
-            const maxWidth = window.innerWidth - position.x - 20;
-            const maxHeight = window.innerHeight - position.y - 100;
+    const rafId = window.requestAnimationFrame(clampWithinViewport);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [clampWithinViewport]);
 
-            setSize({
-                width: Math.min(newWidth, maxWidth),
-                height: Math.min(newHeight, maxHeight)
-            });
-        }
-    }, [isDragging, isResizing, position, minWidth, minHeight]);
+  const isActive = isDragging || isResizing;
+  const hasSize = Boolean(resolvedSize?.width && resolvedSize?.height);
 
-    const handleMouseUp = useCallback(() => {
-        setIsDragging(false);
-        setIsResizing(false);
-    }, []);
+  return (
+    <div
+      ref={dragRef}
+      className={`draggable-widget ${isActive ? 'active' : ''}`}
+      style={{
+        position: 'fixed',
+        left: resolvedPosition.x,
+        top: resolvedPosition.y,
+        width: hasSize ? resolvedSize.width : 'auto',
+        height: hasSize ? resolvedSize.height : 'auto',
+        zIndex: isActive ? zIndex + 100 : zIndex,
+        cursor: isDragging ? 'grabbing' : 'default',
+      }}
+      onMouseDown={handleMouseDown}
+    >
+      <div className="drag-handle-zone">
+        <GripHorizontal size={16} />
+      </div>
 
-    useEffect(() => {
-        if (isDragging || isResizing) {
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-            return () => {
-                window.removeEventListener('mousemove', handleMouseMove);
-                window.removeEventListener('mouseup', handleMouseUp);
-            };
-        }
-    }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
+      <div
+        className="widget-content"
+        style={hasSize
+          ? {
+            width: '100%',
+            height: '100%',
+            overflow: allowOverflow ? 'visible' : 'hidden',
+          }
+          : { overflow: 'visible' }}
+      >
+        {children}
+      </div>
 
-    const isActive = isDragging || isResizing;
+      {!disableResize && (
+        <div className="resize-handle">
+          <svg width="12" height="12" viewBox="0 0 12 12">
+            <path d="M10 2L2 10M10 6L6 10M10 10L10 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </div>
+      )}
 
-    return (
-        <div
-            ref={dragRef}
-            className={`draggable-widget ${isActive ? 'active' : ''}`}
-            style={{
-                position: 'fixed',
-                left: position.x,
-                top: position.y,
-                width: size?.width || 'auto',
-                height: size?.height || 'auto',
-                zIndex: isActive ? zIndex + 100 : zIndex,
-                cursor: isDragging ? 'grabbing' : 'default'
-            }}
-            onMouseDown={handleMouseDown}
-        >
-            <div className="drag-handle-zone">
-                <GripHorizontal size={16} />
-            </div>
-
-            <div className="widget-content" style={size && !disableResize ? { width: '100%', height: '100%', overflow: 'hidden' } : { overflow: 'visible' }}>
-                {children}
-            </div>
-
-            {/* Resize handle - only show if resize is enabled */}
-            {!disableResize && (
-                <div className="resize-handle">
-                    <svg width="12" height="12" viewBox="0 0 12 12">
-                        <path d="M10 2L2 10M10 6L6 10M10 10L10 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                </div>
-            )}
-
-            <style>{`
+      <style>{`
         .draggable-widget {
           transition: ${isActive ? 'none' : 'box-shadow var(--transition-fast)'};
+          box-sizing: border-box;
         }
-        
+
         .draggable-widget.active {
           box-shadow: var(--shadow-lg);
         }
-        
+
         .widget-content {
           display: flex;
           flex-direction: column;
         }
-        
+
         .widget-content > div {
           flex: 1;
           min-height: 0;
           display: flex;
           flex-direction: column;
         }
-        
+
         .drag-handle-zone {
           position: absolute;
           top: 0;
@@ -173,16 +270,16 @@ export default function DraggableWidget({ children, defaultPosition, defaultSize
           transition: opacity var(--transition-fast);
           z-index: 10;
         }
-        
+
         .draggable-widget:hover .drag-handle-zone {
           opacity: 1;
         }
-        
+
         .draggable-widget.active .drag-handle-zone {
           opacity: 1;
           cursor: grabbing;
         }
-        
+
         .resize-handle {
           position: absolute;
           bottom: 0;
@@ -198,16 +295,16 @@ export default function DraggableWidget({ children, defaultPosition, defaultSize
           justify-content: center;
           z-index: 10;
         }
-        
+
         .draggable-widget:hover .resize-handle {
           opacity: 0.6;
         }
-        
+
         .resize-handle:hover {
           opacity: 1 !important;
           color: var(--color-accent);
         }
       `}</style>
-        </div>
-    );
+    </div>
+  );
 }

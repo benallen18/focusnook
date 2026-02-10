@@ -47,17 +47,20 @@ export const defaultSpaces = [
   }
 ];
 
+const soundBaseUrl = import.meta.env.BASE_URL || '/';
+const withSoundBase = (path) => `${soundBaseUrl}${path.replace(/^\/+/, '')}`;
+
 // Ambient sounds data - Using static files from public folder
 export const ambientSounds = [
-  { id: 'rain', name: 'Rain', icon: '🌧️', url: '/sounds/rain.mp3' },
-  { id: 'fire', name: 'Fireplace', icon: '🔥', url: '/sounds/fireplace.mp3' },
-  { id: 'cafe', name: 'Café', icon: '☕', url: '/sounds/cafe.mp3' },
-  { id: 'nature', name: 'Forest', icon: '🌲', url: '/sounds/forest.mp3' },
-  { id: 'waves', name: 'Waves', icon: '🌊', url: '/sounds/waves.mp3' },
-  { id: 'wind', name: 'Wind', icon: '💨', url: '/sounds/wind.mp3' },
-  { id: 'thunder', name: 'Thunder', icon: '⛈️', url: '/sounds/thunder.mp3' },
-  { id: 'birds', name: 'Birds', icon: '🐦', url: '/sounds/birds.mp3' },
-  { id: 'whitenoise', name: 'White Noise', icon: '📻', url: '/sounds/whitenoise.mp3' },
+  { id: 'rain', name: 'Rain', icon: '🌧️', url: withSoundBase('sounds/rain.mp3') },
+  { id: 'fire', name: 'Fireplace', icon: '🔥', url: withSoundBase('sounds/fireplace.mp3') },
+  { id: 'cafe', name: 'Café', icon: '☕', url: withSoundBase('sounds/cafe.mp3') },
+  { id: 'nature', name: 'Forest', icon: '🌲', url: withSoundBase('sounds/forest.mp3') },
+  { id: 'waves', name: 'Waves', icon: '🌊', url: withSoundBase('sounds/waves.mp3') },
+  { id: 'wind', name: 'Wind', icon: '💨', url: withSoundBase('sounds/wind.mp3') },
+  { id: 'thunder', name: 'Thunder', icon: '⛈️', url: withSoundBase('sounds/thunder.mp3') },
+  { id: 'birds', name: 'Birds', icon: '🐦', url: withSoundBase('sounds/birds.mp3') },
+  { id: 'whitenoise', name: 'White Noise', icon: '📻', url: withSoundBase('sounds/whitenoise.mp3') },
 ];
 
 // Music streams data (YouTube live streams and mixes)

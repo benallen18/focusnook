@@ -1,22 +1,36 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Volume2, VolumeX } from 'lucide-react';
 import { ambientSounds } from '../data/spaces';
 
 export default function AmbientSounds() {
     const [activeSounds, setActiveSounds] = useState({});
+    const [soundErrors, setSoundErrors] = useState({});
     const audioRefs = useRef({});
 
-    useEffect(() => {
-        // Initialize audio elements
-        ambientSounds.forEach(sound => {
-            if (!audioRefs.current[sound.id]) {
-                const audio = new Audio(sound.url);
-                audio.loop = true;
-                audio.volume = 0.5;
-                audioRefs.current[sound.id] = audio;
-            }
+    const createAudio = useCallback((sound) => {
+        const audio = new Audio(sound.url);
+        audio.loop = true;
+        audio.volume = 0.5;
+        audio.preload = 'auto';
+        audio.addEventListener('error', () => {
+            setSoundErrors(prev => ({
+                ...prev,
+                [sound.id]: 'Failed to load audio. Please check the file path.'
+            }));
         });
+        return audio;
+    }, []);
 
+    const getAudio = useCallback((soundId) => {
+        if (audioRefs.current[soundId]) return audioRefs.current[soundId];
+        const sound = ambientSounds.find(s => s.id === soundId);
+        if (!sound) return null;
+        const audio = createAudio(sound);
+        audioRefs.current[soundId] = audio;
+        return audio;
+    }, [createAudio]);
+
+    useEffect(() => {
         return () => {
             // Cleanup audio on unmount
             Object.values(audioRefs.current).forEach(audio => {
@@ -26,16 +40,32 @@ export default function AmbientSounds() {
         };
     }, []);
 
-    const toggleSound = (soundId) => {
-        const audio = audioRefs.current[soundId];
+    const toggleSound = async (soundId) => {
+        const audio = getAudio(soundId);
         if (!audio) return;
+
+        setSoundErrors(prev => {
+            if (!prev[soundId]) return prev;
+            const next = { ...prev };
+            delete next[soundId];
+            return next;
+        });
 
         if (activeSounds[soundId]) {
             audio.pause();
             setActiveSounds(prev => ({ ...prev, [soundId]: false }));
         } else {
-            audio.play().catch(() => { });
             setActiveSounds(prev => ({ ...prev, [soundId]: true }));
+            try {
+                await audio.play();
+            } catch (err) {
+                console.warn('Ambient sound playback blocked or failed:', err);
+                setSoundErrors(prev => ({
+                    ...prev,
+                    [soundId]: 'Playback was blocked. Try clicking again.'
+                }));
+                setActiveSounds(prev => ({ ...prev, [soundId]: false }));
+            }
         }
     };
 
@@ -84,6 +114,10 @@ export default function AmbientSounds() {
                                 className="volume-slider animate-fadeIn"
                             />
                         )}
+
+                        {soundErrors[sound.id] && (
+                            <div className="sound-error">{soundErrors[sound.id]}</div>
+                        )}
                     </div>
                 ))}
             </div>
@@ -91,19 +125,28 @@ export default function AmbientSounds() {
             <style>{`
         .ambient-sounds {
           padding: var(--space-6);
-          width: 260px;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          box-sizing: border-box;
         }
         
         .ambient-sounds h3 {
           font-size: var(--font-size-lg);
           font-weight: 600;
           margin-bottom: var(--space-5);
+          flex-shrink: 0;
         }
         
         .sounds-list {
           display: flex;
           flex-direction: column;
           gap: var(--space-3);
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          padding-right: var(--space-1);
         }
         
         .sound-item {
@@ -156,6 +199,12 @@ export default function AmbientSounds() {
         .volume-slider {
           margin-left: var(--space-2);
           margin-right: var(--space-2);
+        }
+
+        .sound-error {
+          font-size: var(--font-size-xs);
+          color: #fca5a5;
+          margin-left: var(--space-2);
         }
       `}</style>
         </div>
