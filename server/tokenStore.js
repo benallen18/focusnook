@@ -2,14 +2,26 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const storeFile = path.join(process.cwd(), 'server', 'data', 'tokens.json');
-const useKv = Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+const useKv = Boolean(
+  (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) ||
+  (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
+);
 let kvClient = null;
 
 const getKv = async () => {
   if (!useKv) return null;
   if (kvClient) return kvClient;
   const mod = await import('@vercel/kv');
-  kvClient = mod.kv;
+
+  if (process.env.KV_REST_API_URL) {
+    kvClient = mod.kv;
+  } else {
+    kvClient = mod.createClient({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+  }
+
   return kvClient;
 };
 
