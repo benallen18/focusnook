@@ -1,7 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 
-const storeFile = path.join(process.cwd(), 'server', 'data', 'tokens.json');
+const isVercel = process.env.VERCEL === '1';
+const dataDir = isVercel ? os.tmpdir() : path.join(process.cwd(), 'server', 'data');
+const storeFile = path.join(dataDir, 'tokens.json');
 const useKv = Boolean(
   (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) ||
   (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
