@@ -1015,7 +1015,7 @@ function App() {
           defaultPosition={pomodoroFrame.position}
           defaultSize={pomodoroFrame.size}
           minWidth={300}
-          minHeight={450}
+          minHeight={430}
           zIndex={widgetZIndices.pomodoro || 10}
           onBringToFront={bringWidgetToFront}
           onLayoutChange={handleWidgetLayoutChange}

@@ -273,12 +273,14 @@ export default function DraggableWidget({
         }
 
         .draggable-widget.active {
-          box-shadow: var(--shadow-lg);
+          /* No shadow/styles on active to prevents square corners behind rounded widgets */
         }
 
         .widget-content {
           display: flex;
           flex-direction: column;
+          border-radius: var(--radius-lg);
+          overflow: hidden;
         }
 
         .widget-content > div {
@@ -286,6 +288,8 @@ export default function DraggableWidget({
           min-height: 0;
           display: flex;
           flex-direction: column;
+          border-radius: var(--radius-lg);
+          overflow: hidden;
         }
 
         .drag-handle-zone {

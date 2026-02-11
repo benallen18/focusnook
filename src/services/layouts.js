@@ -11,7 +11,7 @@ const DEFAULT_VISIBILITY = {
 };
 
 const DEFAULT_WIDGET_SIZE = {
-  pomodoro: { width: 300, height: 450 },
+  pomodoro: { width: 300, height: 430 },
   sounds: { width: 300, height: 320 },
   todos: { width: 340, height: 420 },
   notes: { width: 340, height: 320 },
@@ -47,7 +47,7 @@ const widgetTemplateForPreset = (presetId, viewport) => {
   const lowerLeftY = viewport.height - 380;
 
   const balanced = {
-    pomodoro: { x: 24, y: 80, width: 300, height: 450, visible: true },
+    pomodoro: { x: 24, y: 80, width: 300, height: 430, visible: true },
     sounds: { x: 24, y: 550, width: 300, height: 320, visible: false },
     todos: { x: rightEdge + 40, y: 80, width: 340, height: 420, visible: true },
     notes: { x: rightEdge + 20, y: 520, width: 340, height: 320, visible: false },
@@ -57,7 +57,7 @@ const widgetTemplateForPreset = (presetId, viewport) => {
   };
 
   const focus = {
-    pomodoro: { x: 24, y: 80, width: 300, height: 450, visible: true },
+    pomodoro: { x: 24, y: 80, width: 300, height: 430, visible: true },
     sounds: { x: 24, y: lowerLeftY, width: 300, height: 320, visible: false },
     todos: { x: rightEdge + 20, y: 80, width: 340, height: 360, visible: true },
     notes: { x: rightEdge + 20, y: 460, width: 340, height: 320, visible: false },
@@ -67,7 +67,7 @@ const widgetTemplateForPreset = (presetId, viewport) => {
   };
 
   const wide = {
-    pomodoro: { x: 24, y: 80, width: 300, height: 450, visible: true },
+    pomodoro: { x: 24, y: 80, width: 300, height: 430, visible: true },
     sounds: { x: 24, y: 550, width: 300, height: 320, visible: true },
     todos: { x: viewport.width - 380, y: 80, width: 340, height: 380, visible: true },
     notes: { x: viewport.width - 380, y: 480, width: 340, height: 320, visible: true },

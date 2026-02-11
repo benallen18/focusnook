@@ -250,7 +250,9 @@ export default function Pomodoro({ isMuted = false, onMuteChange }) {
             <style>{`
         .pomodoro {
           padding: var(--space-6);
-          width: 280px;
+          width: 100%;
+          height: 100%;
+          box-sizing: border-box;
           display: flex;
           flex-direction: column;
           gap: var(--space-5);
