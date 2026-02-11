@@ -11,6 +11,13 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const getClientCoords = (event) => {
+  if (event.touches && event.touches.length > 0) {
+    return { x: event.touches[0].clientX, y: event.touches[0].clientY };
+  }
+  return { x: event.clientX, y: event.clientY };
+};
+
 export default function DraggableWidget({
   children,
   defaultPosition,
@@ -56,17 +63,22 @@ export default function DraggableWidget({
   const resolvedPosition = useMemo(() => (position || defaultPosition || { x: 0, y: 0 }), [position, defaultPosition]);
   const resolvedSize = useMemo(() => (size || defaultSize || null), [size, defaultSize]);
 
-  const handleMouseDown = (event) => {
+  const handleInteractionStart = (event) => {
     if (onBringToFront) {
       onBringToFront(widgetId);
     }
+
+    const { x, y } = getClientCoords(event);
 
     if (event.target.closest('.resize-handle')) {
       setIsResizing(true);
       const rect = dragRef.current.getBoundingClientRect();
       startSizeRef.current = { width: rect.width, height: rect.height };
-      startPosRef.current = { x: event.clientX, y: event.clientY };
-      event.preventDefault();
+      startPosRef.current = { x, y };
+      // Prevent default to stop scrolling/selection on touch
+      if (event.cancelable && event.type.startsWith('touch')) {
+        event.preventDefault();
+      }
       event.stopPropagation();
       return;
     }
@@ -75,15 +87,24 @@ export default function DraggableWidget({
       setIsDragging(true);
       const rect = dragRef.current.getBoundingClientRect();
       offsetRef.current = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
+        x: x - rect.left,
+        y: y - rect.top,
       };
-      event.preventDefault();
+      // Prevent default to stop scrolling/selection on touch
+      if (event.cancelable && event.type.startsWith('touch')) {
+        event.preventDefault();
+      }
     }
   };
 
-  const handleMouseMove = useCallback((event) => {
+  const handleInteractionMove = useCallback((event) => {
+    const { x, y } = getClientCoords(event);
+
     if (isDragging) {
+      if (event.cancelable && event.type.startsWith('touch')) {
+        event.preventDefault();
+      }
+
       const currentSize = sizeRef.current;
       const widgetWidth = currentSize?.width || dragRef.current?.offsetWidth || 0;
       const widgetHeight = currentSize?.height || dragRef.current?.offsetHeight || 0;
@@ -91,8 +112,8 @@ export default function DraggableWidget({
       const maxY = Math.max(0, window.innerHeight - widgetHeight - BOTTOM_DOCK_OFFSET);
 
       const nextPosition = {
-        x: clamp(event.clientX - offsetRef.current.x, 0, maxX),
-        y: clamp(event.clientY - offsetRef.current.y, 0, maxY),
+        x: clamp(x - offsetRef.current.x, 0, maxX),
+        y: clamp(y - offsetRef.current.y, 0, maxY),
       };
 
       positionRef.current = nextPosition;
@@ -100,8 +121,12 @@ export default function DraggableWidget({
     }
 
     if (isResizing && !disableResize) {
-      const deltaX = event.clientX - startPosRef.current.x;
-      const deltaY = event.clientY - startPosRef.current.y;
+      if (event.cancelable && event.type.startsWith('touch')) {
+        event.preventDefault();
+      }
+
+      const deltaX = x - startPosRef.current.x;
+      const deltaY = y - startPosRef.current.y;
 
       const nextSize = {
         width: Math.max(minWidth, startSizeRef.current.width + deltaX),
@@ -122,7 +147,7 @@ export default function DraggableWidget({
     }
   }, [disableResize, emitLayoutChange, isDragging, isResizing, minHeight, minWidth]);
 
-  const handleMouseUp = useCallback(() => {
+  const handleInteractionEnd = useCallback(() => {
     setIsDragging(false);
     setIsResizing(false);
   }, []);
@@ -172,13 +197,17 @@ export default function DraggableWidget({
   useEffect(() => {
     if (!isDragging && !isResizing) return undefined;
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousemove', handleInteractionMove);
+    window.addEventListener('touchmove', handleInteractionMove, { passive: false });
+    window.addEventListener('mouseup', handleInteractionEnd);
+    window.addEventListener('touchend', handleInteractionEnd);
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mousemove', handleInteractionMove);
+      window.removeEventListener('touchmove', handleInteractionMove);
+      window.removeEventListener('mouseup', handleInteractionEnd);
+      window.removeEventListener('touchend', handleInteractionEnd);
     };
-  }, [handleMouseMove, handleMouseUp, isDragging, isResizing]);
+  }, [handleInteractionMove, handleInteractionEnd, isDragging, isResizing]);
 
   useEffect(() => {
     const handleResize = () => clampWithinViewport();
@@ -209,7 +238,8 @@ export default function DraggableWidget({
         zIndex: isActive ? zIndex + 100 : zIndex,
         cursor: isDragging ? 'grabbing' : 'default',
       }}
-      onMouseDown={handleMouseDown}
+      onMouseDown={handleInteractionStart}
+      onTouchStart={handleInteractionStart}
     >
       <div className="drag-handle-zone">
         <GripHorizontal size={16} />
