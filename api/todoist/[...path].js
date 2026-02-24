@@ -9,6 +9,9 @@
 const TODOIST_BASE = 'https://api.todoist.com/rest/v2';
 
 export default async function handler(req, res) {
+    // Never cache API proxy responses
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+
     const token = req.headers['x-todoist-token'];
     console.log('[Todoist proxy] method:', req.method, 'query:', JSON.stringify(req.query));
     console.log('[Todoist proxy] token present:', !!token);
