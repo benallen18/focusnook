@@ -3,14 +3,17 @@
  * Handles all interactions with the Todoist REST API v2
  */
 
-// All requests go through our Express proxy to avoid Todoist's CORS restriction
-const API_BASE = `${import.meta.env.VITE_API_BASE_URL ?? '/api'}/todoist`;
+// Use a relative path so requests always go to the same origin on Vercel.
+// VITE_API_BASE_URL (localhost:8787) is only for local dev via Vite's proxy.
+const API_BASE = '/api/todoist';
 
 /**
  * Make an authenticated request to the Todoist API
  */
 async function request(endpoint, token, options = {}) {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const url = `${API_BASE}${endpoint}`;
+    console.log('[Todoist] →', options.method ?? 'GET', url);
+    const response = await fetch(url, {
         ...options,
         headers: {
             // Proxy reads this header and forwards it as Authorization to Todoist
@@ -20,7 +23,11 @@ async function request(endpoint, token, options = {}) {
         },
     });
 
+    console.log('[Todoist] ←', response.status, url);
+
     if (!response.ok) {
+        const body = await response.text();
+        console.error('[Todoist] error body:', body);
         const error = new Error(`Todoist API error: ${response.status}`);
         error.status = response.status;
         throw error;

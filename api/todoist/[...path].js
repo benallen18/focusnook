@@ -10,6 +10,9 @@ const TODOIST_BASE = 'https://api.todoist.com/rest/v2';
 
 export default async function handler(req, res) {
     const token = req.headers['x-todoist-token'];
+    console.log('[Todoist proxy] method:', req.method, 'query:', JSON.stringify(req.query));
+    console.log('[Todoist proxy] token present:', !!token);
+
     if (!token) {
         res.statusCode = 401;
         return res.end(JSON.stringify({ error: 'Missing Todoist token' }));
@@ -27,6 +30,8 @@ export default async function handler(req, res) {
     const queryString = forwardParams.toString();
     const url = `${TODOIST_BASE}${upstreamPath}${queryString ? `?${queryString}` : ''}`;
 
+    console.log('[Todoist proxy] upstream URL:', url);
+
     const fetchOptions = {
         method: req.method,
         headers: {
@@ -41,6 +46,7 @@ export default async function handler(req, res) {
 
     try {
         const upstream = await fetch(url, fetchOptions);
+        console.log('[Todoist proxy] upstream status:', upstream.status);
 
         res.statusCode = upstream.status;
 
@@ -48,12 +54,14 @@ export default async function handler(req, res) {
             return res.end();
         }
 
-        const data = await upstream.json();
+        const text = await upstream.text();
+        console.log('[Todoist proxy] upstream body preview:', text.slice(0, 300));
+
         res.setHeader('Content-Type', 'application/json');
-        return res.end(JSON.stringify(data));
+        return res.end(text);
     } catch (err) {
-        console.error('Todoist proxy error:', err);
+        console.error('[Todoist proxy] fetch error:', err.message);
         res.statusCode = 502;
-        return res.end(JSON.stringify({ error: 'Failed to reach Todoist API' }));
+        return res.end(JSON.stringify({ error: 'Failed to reach Todoist API', detail: err.message }));
     }
 }
