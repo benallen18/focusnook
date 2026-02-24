@@ -38,7 +38,14 @@ async function request(endpoint, token, options = {}) {
         return null;
     }
 
-    return response.json();
+    // Parse JSON safely – log raw text on failure so we can diagnose
+    const text = await response.text();
+    try {
+        return JSON.parse(text);
+    } catch (jsonErr) {
+        console.error('[Todoist] JSON parse failed. Raw response:', text.slice(0, 500));
+        throw jsonErr;
+    }
 }
 
 /**
