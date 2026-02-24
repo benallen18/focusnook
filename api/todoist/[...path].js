@@ -21,17 +21,15 @@ export default async function handler(req, res) {
         return res.end(JSON.stringify({ error: 'Missing Todoist token' }));
     }
 
-    // req.query.path is the [...path] catch-all array, e.g. ['tasks'] or ['tasks', '123', 'close']
-    const pathSegments = Array.isArray(req.query.path) ? req.query.path : [req.query.path];
-    const upstreamPath = '/' + pathSegments.join('/');
-
-    // Forward any other query params (excluding the internal 'path' param)
-    const forwardParams = new URLSearchParams();
-    for (const [key, value] of Object.entries(req.query)) {
-        if (key !== 'path') forwardParams.append(key, value);
-    }
-    const queryString = forwardParams.toString();
-    const url = `${TODOIST_BASE}${upstreamPath}${queryString ? `?${queryString}` : ''}`;
+    // Use req.url directly to avoid req.query.path catch-all ambiguity across Vercel routing modes.
+    // req.url = '/api/todoist/projects' or '/api/todoist/tasks?filter=today'
+    const BASE_PREFIX = '/api/todoist';
+    const rawUrl = req.url || '';
+    // Strip the prefix to get '/projects' or '/tasks?filter=today'
+    const pathAndQuery = rawUrl.startsWith(BASE_PREFIX)
+        ? rawUrl.slice(BASE_PREFIX.length)
+        : rawUrl;
+    const url = `${TODOIST_BASE}${pathAndQuery}`;
 
     console.log('[Todoist proxy] upstream URL:', url);
 
