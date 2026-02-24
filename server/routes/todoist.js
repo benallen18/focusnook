@@ -12,8 +12,8 @@ async function proxyTodoist(req, res) {
         return res.status(401).json({ error: 'Missing Todoist token' });
     }
 
-    // Build the upstream URL: strip the /api/todoist prefix, keep the rest
-    const upstreamPath = req.path; // e.g. /tasks, /tasks/:id/close
+    // req.params[0] captures everything after /api/todoist/ e.g. "tasks" or "tasks/123/close"
+    const upstreamPath = `/${req.params[0]}`;
     const query = new URLSearchParams(req.query).toString();
     const url = `${TODOIST_BASE}${upstreamPath}${query ? `?${query}` : ''}`;
 
